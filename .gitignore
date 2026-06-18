@@ -1,0 +1,29 @@
+# Gradle
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Android / IDE
+local.properties
+.idea/
+*.iml
+.kotlin/
+captures/
+
+# macOS
+.DS_Store
+
+# Xcode / iOS
+iosApp/iosApp.xcodeproj/project.xcworkspace/
+iosApp/iosApp.xcodeproj/xcuserdata/
+iosApp/iosApp.xcworkspace/xcuserdata/
+**/xcuserdata/
+**/*.xcuserstate
+Pods/
+
+# Misc
+*.log
+
+# Local tooling / agent config (machine-specific; never committed)
+.claude/

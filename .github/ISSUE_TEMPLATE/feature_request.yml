@@ -1,0 +1,42 @@
+name: Feature request
+description: Suggest an idea for OpenSefer
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        OpenSefer is intentionally minimalist — "open and read", no bloat. The best feature requests
+        explain the underlying need, not just the solution. Please check the roadmap in
+        [BLUEPRINT.md](../../BLUEPRINT.md) first; some ideas are already planned (e.g. commentaries).
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What are you trying to do that's hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What would you like to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought about, and why they're worse.
+    validations:
+      required: false
+  - type: dropdown
+    id: minimalism
+    attributes:
+      label: Does this fit OpenSefer's minimalism?
+      description: Be honest — features that fight the "open and read" feel are usually declined or deferred.
+      options:
+        - "Yes — it serves the core reading experience"
+        - "Maybe — it's optional / opt-in"
+        - "Not sure"
+    validations:
+      required: true

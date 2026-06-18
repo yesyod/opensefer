@@ -1,0 +1,286 @@
+# detekt configuration for OpenSefer
+# ---------------------------------------------------------------------------
+# Kotlin Multiplatform (:shared) + Compose Multiplatform (:composeApp).
+# Detekt 1.23.7.
+#
+# Philosophy: keep the *correctness*-oriented rule sets (potential-bugs,
+# exceptions, coroutines, empty-blocks) at full strength, but relax the
+# *stylistic* rules that fight idiomatic Compose/KMP code:
+#   - @Composable functions are PascalCase (FunctionNaming).
+#   - UI code is full of literal dp/sp/color numbers (MagicNumber).
+#   - Composables routinely take 8+ slot/state/callback parameters
+#     (LongParameterList) and build deep layout trees (LongMethod).
+#
+# This config is intentionally NOT a hard gate on the first run — see
+# `build.maxIssues` and `config.warningsAsErrors` below. Tighten over time.
+# ---------------------------------------------------------------------------
+
+build:
+  # 0 = fail on any issue. We start lenient so the initial showcase run is
+  # informative rather than blocking. Raise the bar (lower this number) as the
+  # codebase is cleaned up.
+  maxIssues: 50
+  # Don't let a small absolute weight per-file mask a single bad file.
+  excludeCorrectable: false
+  weights:
+    # (optional) complexity: 2  # example of weighting a category heavier
+
+config:
+  # Validate that this file only references rules detekt actually knows about.
+  validation: true
+  # Treat the YAML structure strictly so typos in rule names surface.
+  warningsAsErrors: false
+  # Allow a few non-rule keys (e.g. shared excludes anchors) without warnings.
+  checkExhaustiveness: false
+
+processors:
+  active: true
+  exclude:
+    # These metric processors only feed reports; keep them but list here if
+    # you ever want to silence a specific one.
+    - 'DetektProgressListener'
+
+console-reports:
+  active: true
+  exclude:
+    - 'ProjectStatisticsReport'
+    - 'ComplexityReport'
+    - 'NotApiReport'
+    # Keep FindingsReport + FileBasedFindingsReport so console output is useful.
+    - 'LiteFindingsReport'
+
+output-reports:
+  active: true
+  exclude:
+    # HTML + SARIF + XML are produced by default; drop none here.
+
+# ===========================================================================
+# Rule sets
+# ===========================================================================
+
+comments:
+  active: true
+  # Don't demand KDoc everywhere — this is an app, not a published library.
+  CommentOverPrivateFunction:
+    active: false
+  CommentOverPrivateProperty:
+    active: false
+  UndocumentedPublicClass:
+    active: false
+  UndocumentedPublicFunction:
+    active: false
+  UndocumentedPublicProperty:
+    active: false
+
+complexity:
+  active: true
+  LongMethod:
+    active: true
+    # Composables build whole screens inline; 60 (default) is too tight.
+    threshold: 80
+  LongParameterList:
+    active: true
+    # Composables take many slot/state/callback params; default is 6.
+    functionThreshold: 8
+    constructorThreshold: 8
+    ignoreDefaultParameters: true
+    # ViewModels/UI states are data-holders with many defaulted fields.
+    ignoreAnnotated:
+      - 'Composable'
+  TooManyFunctions:
+    active: true
+    # ViewModels expose many small intent functions (see ReaderViewModel).
+    thresholdInClasses: 18
+    thresholdInFiles: 25
+    thresholdInObjects: 18
+    ignoreDeprecated: true
+    ignorePrivate: false
+    ignoreOverridden: true
+  CyclomaticComplexMethod:
+    active: true
+    threshold: 18
+  NestedBlockDepth:
+    active: true
+    # `when` inside Scaffold inside Box is common; allow a little more depth.
+    threshold: 5
+  LargeClass:
+    active: true
+    threshold: 600
+
+coroutines:
+  active: true
+  # Correctness-critical for KMP — keep these on.
+  GlobalCoroutineUsage:
+    active: true
+  RedundantSuspendModifier:
+    active: true
+  SuspendFunWithFlowReturnType:
+    active: true
+  SleepInsteadOfDelay:
+    active: true
+
+empty-blocks:
+  active: true
+  # Defaults are fine; empty bodies usually indicate a real mistake.
+  EmptyFunctionBlock:
+    active: true
+    ignoreOverridden: true
+
+exceptions:
+  active: true
+  # Keep exception hygiene strict — these catch real bugs.
+  TooGenericExceptionCaught:
+    active: true
+    # Result.fold / runCatching flows legitimately surface a generic `e`.
+    allowedExceptionNameRegex: '_|(ignore|expected).*'
+  SwallowedException:
+    active: true
+  ThrowingExceptionsWithoutMessageOrCause:
+    active: true
+  ReturnFromFinally:
+    active: true
+
+naming:
+  active: true
+  FunctionNaming:
+    active: true
+    # Allow BOTH lowerCamelCase (regular functions) AND PascalCase
+    # (@Composable functions: ReaderScreen, OpenSeferTheme, SegmentRow ...).
+    functionPattern: '([A-Za-z][a-zA-Z0-9]*)|(`.*`)'
+    excludeClassPattern: '$^'
+    # Belt-and-suspenders: never flag annotated composables.
+    ignoreAnnotated:
+      - 'Composable'
+  TopLevelPropertyNaming:
+    active: true
+    # `LocalReadingColors`, `LocalFontScale` are PascalCase composition locals
+    # by Compose convention; allow PascalCase top-level constants/vals.
+    constantPattern: '[A-Z][_A-Za-z0-9]*'
+    propertyPattern: '[A-Za-z][_A-Za-z0-9]*'
+    privatePropertyPattern: '_?[A-Za-z][_A-Za-z0-9]*'
+  ObjectPropertyNaming:
+    active: true
+    constantPattern: '[A-Za-z][_A-Za-z0-9]*'
+  VariableNaming:
+    active: true
+    # Backing fields like `_state` are idiomatic.
+    variablePattern: '[a-z][A-Za-z0-9]*'
+    privateVariablePattern: '_?[a-z][A-Za-z0-9]*'
+  MatchingDeclarationName:
+    # One file often hosts a screen + several private composables; don't force
+    # the filename to match the first declaration.
+    active: false
+  ConstructorParameterNaming:
+    active: true
+    privateParameterPattern: '[a-z][A-Za-z0-9]*'
+
+performance:
+  active: true
+  SpreadOperator:
+    active: true
+  ForEachOnRange:
+    active: true
+  UnnecessaryTemporaryInstantiation:
+    active: true
+
+potential-bugs:
+  active: true
+  # The high-value correctness set — keep all of it on.
+  EqualsAlwaysReturnsTrueOrFalse:
+    active: true
+  ImplicitDefaultLocale:
+    active: true
+  InvalidRange:
+    active: true
+  IteratorHasNextCallsNextMethod:
+    active: true
+  UnreachableCode:
+    active: true
+  UnsafeCallOnNullableType:
+    active: true
+  UnsafeCast:
+    active: true
+  WrongEqualsTypeParameter:
+    active: true
+
+style:
+  active: true
+  MagicNumber:
+    # UI is saturated with literal dp/sp/hex-color/scale numbers. Turning this
+    # fully off keeps the report readable; if you re-enable it, the ignore
+    # options below are the ones that matter for Compose.
+    active: false
+    ignoreNumbers:
+      - '-1'
+      - '0'
+      - '1'
+      - '2'
+    ignoreHashCodeFunction: true
+    ignorePropertyDeclaration: true
+    ignoreCompanionObjectPropertyDeclaration: true
+    ignoreAnnotation: true
+    ignoreNamedArgument: true
+    ignoreEnums: true
+    ignoreRanges: true
+  WildcardImport:
+    active: true
+    # The codebase uses explicit imports everywhere; keep it that way.
+    excludeImports:
+      - 'java.util.*'
+  MaxLineLength:
+    active: true
+    # Compose call chains and DTO annotations run long; 140 is comfortable.
+    maxLineLength: 140
+    excludePackageStatements: true
+    excludeImportStatements: true
+    excludeCommentStatements: false
+  ReturnCount:
+    active: true
+    # Guard-clause-heavy intent functions (see ReaderViewModel.load) need room.
+    max: 4
+  NewLineAtEndOfFile:
+    # Project files already end with a newline; keep enforcing it.
+    active: true
+  TrailingWhitespace:
+    active: true
+  UnusedPrivateMember:
+    active: true
+    # @Composable previews and many private composables are referenced only by
+    # the framework / by reflection — don't flag them as unused.
+    ignoreAnnotated:
+      - 'Composable'
+      - 'Preview'
+  UnusedPrivateProperty:
+    active: true
+    ignoreAnnotated:
+      - 'Composable'
+      - 'Preview'
+  UnusedParameter:
+    active: true
+    # The trailing `content: @Composable () -> Unit` / modifier params are part
+    # of the slot API even when a given overload ignores them.
+    ignoreAnnotated:
+      - 'Composable'
+      - 'Preview'
+  ForbiddenComment:
+    active: true
+    # Flag TODO/FIXME so they don't rot, but allow plain "NOTE:" prose.
+    comments:
+      - reason: 'Forbidden TODO todo marker in comment, please use a ticket instead.'
+        value: 'TODO:'
+      - reason: 'Forbidden FIXME marker in comment, please fix promptly.'
+        value: 'FIXME:'
+  DataClassContainsFunctions:
+    active: false
+  UseDataClass:
+    active: false
+  FunctionOnlyReturningConstant:
+    active: true
+    ignoreAnnotated:
+      - 'Composable'
+  LoopWithTooManyJumpStatements:
+    active: true
+    maxJumpCount: 2
+  ThrowsCount:
+    active: true
+    max: 3

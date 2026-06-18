@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Framework Material theme so we need no extra AppCompat/Material dependency.
+         The real UI theming lives in Compose (:core:designsystem). -->
+    <style name="Theme.OpenSefer" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+</resources>

@@ -1,0 +1,60 @@
+name: Bug report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please search existing issues first to avoid duplicates.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including what you expected to happen instead.
+      placeholder: When I open a Siddur and tap "…", the screen shows nothing.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact steps so we can see it too.
+      placeholder: |
+        1. Open the app
+        2. Search for "…"
+        3. Tap "…"
+        4. See the error
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Android
+        - iOS
+        - Both
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: Found in the About screen (e.g. 0.1.0).
+    validations:
+      required: false
+  - type: input
+    id: device
+    attributes:
+      label: Device & OS
+      description: e.g. Pixel 7 / Android 14, or iPhone 13 / iOS 17.
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste any relevant logcat/Xcode output or attach screenshots. This will be formatted as code.
+      render: shell
+    validations:
+      required: false
