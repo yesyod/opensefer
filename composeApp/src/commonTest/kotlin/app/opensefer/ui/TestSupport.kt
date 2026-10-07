@@ -1,7 +1,9 @@
 package app.opensefer.ui
 
+import app.opensefer.core.domain.BookDownloader
 import app.opensefer.core.domain.BookmarkRepository
 import app.opensefer.core.domain.LibraryRepository
+import app.opensefer.core.domain.OfflineStorage
 import app.opensefer.core.domain.ReadingLanguage
 import app.opensefer.core.domain.ReadingPreferences
 import app.opensefer.core.domain.ReadingPreferencesRepository
@@ -23,6 +25,7 @@ import app.opensefer.core.model.TocBranch
 import app.opensefer.core.model.TocLeaf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -83,6 +86,7 @@ internal fun sampleChapter(tref: String = "Book 1", segments: Int = 3): ChapterT
 
 internal class FakeTextRepository(
     private val contents: Result<BookContents> = Result.success(sampleContents()),
+    private val latencyMillis: (String) -> Long = { 0L }, // virtual time each passage takes to "download"
     private val chapter: (String) -> Result<ChapterText> = { Result.success(sampleChapter(it)) },
 ) : TextRepository {
     val requested = mutableListOf<String>()
@@ -91,6 +95,7 @@ internal class FakeTextRepository(
 
     override suspend fun getText(tref: String): Result<ChapterText> {
         requested += tref
+        latencyMillis(tref).takeIf { it > 0 }?.let { delay(it) }
         return chapter(tref)
     }
 
@@ -113,6 +118,20 @@ internal class FakePreferencesRepository(
     override fun setTheme(theme: ReadingTheme) = _preferences.update { it.copy(theme = theme) }
     override fun setLanguage(language: ReadingLanguage) = _preferences.update { it.copy(language = language) }
     override fun setShowNikud(show: Boolean) = _preferences.update { it.copy(showNikud = show) }
+    override fun toggleShowNikud() = _preferences.update { it.copy(showNikud = !it.showNikud) }
+}
+
+/** A downloader running in the test's background scope, over fakes. */
+internal fun TestScope.testDownloader(
+    library: LibraryRepository,
+    text: TextRepository = FakeTextRepository(),
+): BookDownloader = BookDownloader(text, library, backgroundScope, FakeOfflineStorage())
+
+/** On‑device storage that holds every book (nothing to re‑download). */
+internal class FakeOfflineStorage : OfflineStorage {
+    override suspend fun isStored(bookTitle: String) = true
+    override suspend fun sizeBytes() = 0L
+    override suspend fun clearExcept(keepBooks: Set<String>) = Unit
 }
 
 internal class FakeLibraryRepository(initial: List<LibraryBook> = emptyList()) : LibraryRepository {

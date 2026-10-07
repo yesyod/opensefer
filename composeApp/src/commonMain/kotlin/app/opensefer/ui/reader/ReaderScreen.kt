@@ -21,7 +21,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.CircularProgressIndicator
@@ -29,8 +28,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -43,7 +44,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +56,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -64,6 +70,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -80,6 +87,7 @@ import app.opensefer.ui.components.LoadingState
 import app.opensefer.ui.icons.AppIcons
 import app.opensefer.ui.navigation.Destination
 import app.opensefer.ui.navigation.PlatformBackHandler
+import app.opensefer.ui.navigation.platformHasSystemBack
 import app.opensefer.ui.text.toAnnotatedString
 import app.opensefer.ui.text.withNikud
 import app.opensefer.ui.theme.LocalFontScale
@@ -99,7 +107,11 @@ fun ReaderScreen(
     libraryRepository: LibraryRepository = koinInject(),
     bookmarkRepository: BookmarkRepository = koinInject(),
 ) {
+    // Where the reader is, kept with the screen's saved state: if the app is killed in the background,
+    // the recreated reader reopens right here — not at the bookmark or chapter it was first opened at.
+    var resumeAt by rememberSaveable(stateSaver = ResumePointSaver) { mutableStateOf<ResumePoint?>(null) }
     val viewModel = viewModel {
+        val at = resumeAt
         ReaderViewModel(
             textRepository,
             preferencesRepository,
@@ -107,14 +119,35 @@ fun ReaderScreen(
             bookmarkRepository,
             destination.bookTitle,
             destination.heBookTitle,
-            destination.startTref,
-            destination.startSegment,
+            startTref = at?.tref ?: destination.startTref,
+            startSegment = at?.segment ?: destination.startSegment,
+            startOffset = at?.offset ?: 0,
         )
     }
+    val listState = viewModel { ReaderListState() }.list
     val state by viewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(viewModel) {
+        viewModel.position.collect { p -> if (p != null) resumeAt = ResumePoint(p.tref, p.segment, p.offset) }
+    }
     // The app may be killed in the background: write the reading position the moment it leaves the screen.
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.flushPosition() }
-    ReaderContent(state, viewModel, onBack, onAboutBook)
+    ReaderContent(state, viewModel, listState, onBack, onAboutBook)
+}
+
+private data class ResumePoint(val tref: String, val segment: Int, val offset: Int)
+
+private val ResumePointSaver = listSaver<ResumePoint?, Any>(
+    save = { point -> if (point == null) emptyList() else listOf(point.tref, point.segment, point.offset) },
+    restore = { saved -> if (saved.size == 3) ResumePoint(saved[0] as String, saved[1] as Int, saved[2] as Int) else null },
+)
+
+/**
+ * The reader's scroll state, kept for as long as the reader is on the back stack (in its own
+ * ViewModel slot) instead of being saved as a bare index: coming back from "About this book" after
+ * passages above the screen have loaded, the list re‑finds its first row by key — same text, same spot.
+ */
+class ReaderListState : ViewModel() {
+    val list = LazyListState()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -122,22 +155,36 @@ fun ReaderScreen(
 private fun ReaderContent(
     state: ReaderUiState,
     viewModel: ReaderViewModel,
+    listState: LazyListState,
     onBack: () -> Unit,
     onAboutBook: () -> Unit,
 ) {
     val colors = LocalReadingColors.current
-    val listState = rememberLazyListState()
     val snackbar = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
-    val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
+    // The top bar slides away while reading where the system offers Back anyway (Android); on iOS it
+    // holds the only way back, so it stays put.
+    val scrollBehavior = if (platformHasSystemBack) {
+        TopAppBarDefaults.enterAlwaysScrollBehavior()
+    } else {
+        TopAppBarDefaults.pinnedScrollBehavior()
+    }
     val english = state.preferences.language == ReadingLanguage.English
 
     PlatformBackHandler(enabled = state.selection.isNotEmpty(), onBack = viewModel::clearSelection)
 
     LaunchedEffect(state.message) {
         val message = state.message ?: return@LaunchedEffect
-        snackbar.showSnackbar(message)
-        viewModel.consumeMessage()
+        try {
+            val result = snackbar.showSnackbar(
+                message = message.text,
+                actionLabel = message.action?.label(),
+                duration = if (message.action == null) SnackbarDuration.Short else SnackbarDuration.Long,
+            )
+            if (result == SnackbarResult.ActionPerformed) message.action?.let(viewModel::onMessageAction)
+        } finally {
+            viewModel.consumeMessage(message.id) // also when the reader leaves mid‑snackbar: never shown twice
+        }
     }
     LaunchedEffect(state.scrollRequest) {
         val request = state.scrollRequest ?: return@LaunchedEffect
@@ -170,6 +217,7 @@ private fun ReaderContent(
             if (state.selection.isNotEmpty()) {
                 SelectionBar(
                     count = state.selection.size,
+                    bookmarked = state.selectionBookmarked,
                     onCopy = { viewModel.copySelection()?.let { clipboard.setText(AnnotatedString(it)) } },
                     onBookmark = viewModel::bookmarkSelection,
                     onClose = viewModel::clearSelection,
@@ -202,6 +250,7 @@ private fun ReaderSheets(state: ReaderUiState, viewModel: ReaderViewModel, onAbo
                 onOpen = { viewModel.jumpTo(it.tref) },
                 onOpenBookmark = { viewModel.jumpTo(it.tref, it.segment) },
                 onDeleteBookmark = { viewModel.removeBookmark(it.id) },
+                onRestoreBookmark = viewModel::restoreBookmark,
                 onAbout = {
                     viewModel.closeSheet()
                     onAboutBook()
@@ -219,6 +268,12 @@ private fun ReaderSheets(state: ReaderUiState, viewModel: ReaderViewModel, onAbo
         )
         null -> Unit
     }
+}
+
+private fun MessageAction.label(): String = when (this) {
+    MessageAction.SaveBook -> UiStrings.SAVE
+    MessageAction.ShowBookmarks -> UiStrings.ALL_BOOKMARKS
+    is MessageAction.RestoreBookmark, is MessageAction.RestoreBook -> UiStrings.UNDO
 }
 
 /** The label of the passage at row [index] (its Hebrew — or, in English mode, English — title). */
@@ -251,6 +306,7 @@ private fun ReaderTopBar(
             title = {
                 Row(
                     Modifier
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .clickable(onClickLabel = UiStrings.CONTENTS, onClick = onContents)
                         .padding(horizontal = 6.dp, vertical = 4.dp),
@@ -350,8 +406,12 @@ private fun segmentBookmarkId(row: SegmentRow): String = bookmarkId(row.leaf.tre
 /**
  * Keeps the text the reader is looking at still when rows change under it. The list already anchors
  * on the first visible row's key; this covers the one case it can't — that row itself vanishing
- * (a passage's loading placeholder replaced by its text) — by pinning the next visible row that
- * survives to its current spot, in the same frame (`requestScrollToItem` before the next measure).
+ * (a passage's loading placeholder replaced by its text, or collapsing because it has none).
+ *
+ * Scrolling **up** into a loading passage, what the reader is looking at is below the placeholder,
+ * so the next visible row that survives is pinned to its spot (`requestScrollToItem` before the next
+ * measure) and the new text appears above, out of sight. Scrolling **down** (or not at all), the list's
+ * own behaviour is right: the text simply takes the placeholder's place.
  */
 private class RowsAnchor {
     private var rows: List<ReaderRow>? = null
@@ -363,6 +423,7 @@ private class RowsAnchor {
         val first = visible.firstOrNull()
         // Common case: the top row is still there (same index, or moved — the list follows its key).
         if (!changed || first == null || newRows.getOrNull(first.index)?.key == first.key) return
+        if (!listState.lastScrolledBackward) return
         val newIndex = HashMap<Any, Int>(newRows.size * 2).apply { newRows.forEachIndexed { i, row -> put(row.key, i) } }
         val survivor = visible.firstOrNull { it.key in newIndex }
         if (first.key !in newIndex && survivor != null) {
@@ -422,18 +483,19 @@ private fun SegmentItem(
     val showHebrew = language != ReadingLanguage.English && hebrew != null
     val showEnglish = language != ReadingLanguage.Hebrew && english != null
 
+    // A tap anywhere on a segment selects it (then copy / bookmark from the bar) — the way Sefaria's
+    // readers expect; a long‑press still selects words, as in any text.
     val rowModifier = Modifier
         .fillMaxWidth()
         .padding(vertical = 2.dp)
         .clip(RoundedCornerShape(8.dp))
         .background(if (selected) colors.highlight else Color.Transparent)
-        .then(if (selectionMode) Modifier.clickable(onClickLabel = UiStrings.SELECT, onClick = onToggle) else Modifier)
+        .clickable(interactionSource = null, indication = null, onClickLabel = UiStrings.SELECT, onClick = onToggle)
         .padding(vertical = 4.dp)
 
-    // In selection mode a tap toggles the whole segment; otherwise long‑press selects words to copy.
     val texts: @Composable () -> Unit = {
         Column(Modifier.fillMaxWidth()) {
-            if (showHebrew && hebrew != null) {
+            if (showHebrew) {
                 Text(
                     text = hebrew,
                     style = if (segment.isRubric) rubricStyle(hebrewReadingStyle()) else hebrewReadingStyle(),
@@ -441,7 +503,7 @@ private fun SegmentItem(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            if (showEnglish && english != null) {
+            if (showEnglish) {
                 Text(
                     text = english,
                     style = if (segment.isRubric) rubricStyle(englishReadingStyle()) else englishReadingStyle(),
@@ -457,7 +519,6 @@ private fun SegmentItem(
             SegmentNumber(
                 label = if (language == ReadingLanguage.English) segment.enLabel else segment.label,
                 bookmarked = bookmarked,
-                onClick = onToggle,
             )
         } else {
             Spacer(Modifier.widthIn(min = 40.dp))
@@ -472,20 +533,14 @@ private fun SegmentItem(
 private fun rubricStyle(base: TextStyle) =
     base.copy(color = LocalReadingColors.current.secondaryText, fontStyle = FontStyle.Italic)
 
-/**
- * The verse/halacha number — a tap target that starts "select to copy / bookmark". A small ribbon
- * marks a bookmarked segment.
- */
+/** The verse/halacha number in the margin. A small ribbon marks a bookmarked segment. */
 @Composable
-private fun SegmentNumber(label: String, bookmarked: Boolean, onClick: () -> Unit) {
+private fun SegmentNumber(label: String, bookmarked: Boolean) {
     val colors = LocalReadingColors.current
     val scale = LocalFontScale.current
     Column(
         Modifier
             .widthIn(min = 40.dp)
-            .heightIn(min = 40.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClickLabel = UiStrings.SELECT, onClick = onClick)
             .semantics { contentDescription = if (bookmarked) "$label · ${UiStrings.BOOKMARK}" else label }
             .padding(top = 6.dp, end = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -518,8 +573,18 @@ private fun LazyItemScope.PendingItem(row: PendingRow, onRetry: () -> Unit) {
 }
 
 @Composable
-private fun SelectionBar(count: Int, onCopy: () -> Unit, onBookmark: () -> Unit, onClose: () -> Unit) {
+private fun SelectionBar(
+    count: Int,
+    bookmarked: Boolean,
+    onCopy: () -> Unit,
+    onBookmark: () -> Unit,
+    onClose: () -> Unit,
+) {
     val colors = LocalReadingColors.current
+    // With a large system font the labels can't share a phone's width: the buttons go icon‑only.
+    val compact = LocalDensity.current.fontScale > LARGE_FONT_SCALE
+    val bookmarkIcon = if (bookmarked) AppIcons.Bookmark else AppIcons.BookmarkBorder
+    val bookmarkText = if (bookmarked) UiStrings.REMOVE_BOOKMARK else UiStrings.BOOKMARK
     Surface(color = colors.surface, shadowElevation = 8.dp) {
         Row(
             Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp),
@@ -528,7 +593,13 @@ private fun SelectionBar(count: Int, onCopy: () -> Unit, onBookmark: () -> Unit,
         ) {
             IconAction(AppIcons.Close, UiStrings.CLOSE, onClose, tint = colors.secondaryText)
             Column(Modifier.weight(1f)) {
-                Text(UiStrings.selectedCount(count), color = colors.text, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    UiStrings.selectedCount(count),
+                    color = colors.text,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 Text(
                     UiStrings.SELECTION_HINT,
                     color = colors.secondaryText,
@@ -537,14 +608,21 @@ private fun SelectionBar(count: Int, onCopy: () -> Unit, onBookmark: () -> Unit,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            TextButton(onClick = onBookmark) {
-                Icon(AppIcons.BookmarkBorder, contentDescription = null, tint = colors.accent)
-                Text(UiStrings.BOOKMARK, color = colors.accent, modifier = Modifier.padding(start = 4.dp))
-            }
-            TextButton(onClick = onCopy) {
-                Icon(AppIcons.Copy, contentDescription = null, tint = colors.accent)
-                Text(UiStrings.COPY, color = colors.accent, modifier = Modifier.padding(start = 4.dp))
+            if (compact) {
+                IconAction(bookmarkIcon, bookmarkText, onBookmark)
+                IconAction(AppIcons.Copy, UiStrings.COPY, onCopy)
+            } else {
+                TextButton(onClick = onBookmark) {
+                    Icon(bookmarkIcon, contentDescription = null, tint = colors.accent)
+                    Text(bookmarkText, color = colors.accent, modifier = Modifier.padding(start = 4.dp))
+                }
+                TextButton(onClick = onCopy) {
+                    Icon(AppIcons.Copy, contentDescription = null, tint = colors.accent)
+                    Text(UiStrings.COPY, color = colors.accent, modifier = Modifier.padding(start = 4.dp))
+                }
             }
         }
     }
 }
+
+private const val LARGE_FONT_SCALE = 1.3f

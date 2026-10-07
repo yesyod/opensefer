@@ -34,7 +34,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -50,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -67,10 +67,10 @@ import app.opensefer.ui.UiStrings
 import app.opensefer.ui.components.AppTopBar
 import app.opensefer.ui.components.IconAction
 import app.opensefer.ui.components.SectionHeader
+import app.opensefer.ui.components.showUndoSnackbar
 import app.opensefer.ui.icons.AppIcons
 import app.opensefer.ui.reader.BookmarkRow
 import app.opensefer.ui.theme.LocalReadingColors
-import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 /**
@@ -100,7 +100,7 @@ fun LibraryScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             AppTopBar(title = UiStrings.LIBRARY) {
-                IconAction(AppIcons.Search, UiStrings.ADD_BOOK, onAddBook)
+                IconAction(AppIcons.Search, UiStrings.SEARCH_BOOK, onAddBook)
                 IconAction(AppIcons.Info, UiStrings.ABOUT, onAbout)
             }
         },
@@ -115,7 +115,10 @@ fun LibraryScreen(
                 onBookActions = { actionsFor = it },
                 onAddBook = onAddBook,
                 onOpenBookmark = onOpenBookmark,
-                onDeleteBookmark = viewModel::removeBookmark,
+                onDeleteBookmark = { bookmark ->
+                    viewModel.removeBookmark(bookmark)
+                    scope.showUndoSnackbar(snackbar, UiStrings.BOOKMARK_REMOVED) { viewModel.restoreBookmark(bookmark) }
+                },
             )
         }
     }
@@ -128,11 +131,8 @@ fun LibraryScreen(
             onBookPage = { onOpenBookPage(book) },
             onDownload = { viewModel.download(book) },
             onRemove = {
-                viewModel.remove(book)
-                scope.launch {
-                    val result = snackbar.showSnackbar(UiStrings.REMOVED_FROM_LIBRARY, actionLabel = UiStrings.UNDO)
-                    if (result == SnackbarResult.ActionPerformed) viewModel.undoRemove(book)
-                }
+                val removed = viewModel.remove(book)
+                scope.showUndoSnackbar(snackbar, UiStrings.REMOVED_FROM_LIBRARY) { viewModel.undoRemove(removed) }
             },
             onDismiss = { actionsFor = null },
         )
@@ -236,7 +236,7 @@ private fun ContinueCard(book: LibraryBook, onClick: () -> Unit) {
                 heCategory = book.heCategory,
                 heAuthor = book.heAuthor,
                 compact = true,
-                modifier = Modifier.width(56.dp),
+                modifier = Modifier.width(56.dp).clearAndSetSemantics {}, // the title is right beside it
             )
             Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
                 Text(UiStrings.CONTINUE_READING, style = MaterialTheme.typography.labelMedium, color = colors.accent)
@@ -273,7 +273,7 @@ private fun CoverTile(
         modifier
             .clip(RoundedCornerShape(8.dp))
             .combinedClickable(
-                onClickLabel = UiStrings.CONTINUE_READING,
+                onClickLabel = if (book.lastReadAt > 0) UiStrings.CONTINUE_READING else UiStrings.OPEN_BOOK,
                 onLongClickLabel = UiStrings.BOOK_OPTIONS,
                 onClick = onClick,
                 onLongClick = onLongClick,
@@ -403,7 +403,14 @@ private fun BookActionsSheet(
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = colors.surface) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 16.dp)) {
             Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                BookCover(book.heTitle, book.category, book.heCategory, book.heAuthor, Modifier.width(48.dp), compact = true)
+                BookCover(
+                    book.heTitle,
+                    book.category,
+                    book.heCategory,
+                    book.heAuthor,
+                    Modifier.width(48.dp).clearAndSetSemantics {},
+                    compact = true,
+                )
                 Column(Modifier.padding(start = 14.dp)) {
                     Text(book.heTitle, style = MaterialTheme.typography.titleMedium, color = colors.text, fontWeight = FontWeight.Bold)
                     book.heAuthor?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.secondaryText) }
@@ -418,8 +425,8 @@ private fun BookActionsSheet(
                 onBookPage()
             }
             when {
-                download != null -> SheetAction(AppIcons.Download, "${UiStrings.DOWNLOADING} ${download.done}/${download.total}") {}
-                book.offline -> SheetAction(AppIcons.OfflinePin, UiStrings.AVAILABLE_OFFLINE) {}
+                download != null -> SheetAction(AppIcons.Download, "${UiStrings.DOWNLOADING} ${download.done}/${download.total}")
+                book.offline -> SheetAction(AppIcons.OfflinePin, UiStrings.AVAILABLE_OFFLINE)
                 else -> SheetAction(AppIcons.Download, UiStrings.DOWNLOAD_OFFLINE) {
                     onDismiss()
                     onDownload()
@@ -433,19 +440,25 @@ private fun BookActionsSheet(
     }
 }
 
+/** One row of the options sheet; without [onClick] it's a plain status line (nothing to tap). */
 @Composable
 private fun SheetAction(
     icon: ImageVector,
     text: String,
     destructive: Boolean = false,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)? = null,
 ) {
     val colors = LocalReadingColors.current
     val tint = if (destructive) MaterialTheme.colorScheme.error else colors.text
-    Surface(onClick = onClick, color = colors.surface, modifier = Modifier.fillMaxWidth()) {
+    val content: @Composable () -> Unit = {
         Row(Modifier.padding(horizontal = 20.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, contentDescription = null, tint = if (destructive) tint else colors.accent)
             Text(text, color = tint, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 16.dp))
         }
+    }
+    if (onClick != null) {
+        Surface(onClick = onClick, color = colors.surface, modifier = Modifier.fillMaxWidth(), content = content)
+    } else {
+        Surface(color = colors.surface, modifier = Modifier.fillMaxWidth(), content = content)
     }
 }

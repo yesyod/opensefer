@@ -1,5 +1,6 @@
 package app.opensefer.ui.theme
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
@@ -20,9 +21,10 @@ import app.opensefer.core.domain.ReadingTheme
 
 /**
  * The reading surface palette. Three calm themes tuned for long‑form study — light, sepia (warm
- * paper) and dark. Kept separate from Material's [androidx.compose.material3.ColorScheme] because
- * the *reading surface* has its own deliberate colors (text, parchment, accent, divider); the
- * Material scheme is derived from it so every component (switches, fields, sheets) matches.
+ * paper) and dark (plus "automatic", which follows the device). Kept separate from Material's
+ * [androidx.compose.material3.ColorScheme] because the *reading surface* has its own deliberate
+ * colors (text, parchment, accent, divider); the Material scheme is derived from it so every
+ * component (switches, fields, sheets) matches.
  */
 @Immutable
 data class ReadingColors(
@@ -49,15 +51,16 @@ private val LightReading = ReadingColors(
     isDark = false,
 )
 
+// A deeper accent than light's: on paper, and under a selection's highlight, it keeps WCAG AA contrast.
 private val SepiaReading = ReadingColors(
     background = Color(0xFFF4ECD8),
     surface = Color(0xFFEFE6CE),
     text = Color(0xFF3B2F1E),
     secondaryText = Color(0xFF6E5B3E),
-    accent = Color(0xFF8A5A2B),
+    accent = Color(0xFF74491F),
     onAccent = Color(0xFFFFF8EC),
     divider = Color(0xFFDDCFB0),
-    highlight = Color(0x338A5A2B),
+    highlight = Color(0x3374491F),
     isDark = false,
 )
 
@@ -73,7 +76,9 @@ private val DarkReading = ReadingColors(
     isDark = true,
 )
 
-fun ReadingTheme.toColors(): ReadingColors = when (this) {
+/** The palette for this theme; [ReadingTheme.System] resolves through [systemDark]. */
+fun ReadingTheme.toColors(systemDark: Boolean): ReadingColors = when (this) {
+    ReadingTheme.System -> if (systemDark) DarkReading else LightReading
     ReadingTheme.Light -> LightReading
     ReadingTheme.Sepia -> SepiaReading
     ReadingTheme.Dark -> DarkReading
@@ -177,7 +182,7 @@ fun OpenSeferTheme(
     fontScale: Float,
     content: @Composable () -> Unit,
 ) {
-    val reading = theme.toColors()
+    val reading = theme.toColors(systemDark = isSystemInDarkTheme())
     val scheme = remember(reading) { reading.toColorScheme() }
     CompositionLocalProvider(
         LocalReadingColors provides reading,

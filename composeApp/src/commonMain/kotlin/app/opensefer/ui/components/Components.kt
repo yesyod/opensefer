@@ -12,6 +12,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -30,6 +33,8 @@ import androidx.compose.ui.unit.dp
 import app.opensefer.ui.UiStrings
 import app.opensefer.ui.icons.AppIcons
 import app.opensefer.ui.theme.LocalReadingColors
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 
 /** The app's top bar: reading‑surface colours, an optional back arrow, a one‑line title. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -113,5 +118,17 @@ fun SectionHeader(text: String, modifier: Modifier = Modifier, trailing: @Compos
             modifier = Modifier.align(Alignment.CenterStart).semantics { heading() },
         )
         Box(Modifier.align(Alignment.CenterEnd)) { trailing() }
+    }
+}
+
+/**
+ * Shows [message] with an "undo" action — replacing any snackbar on screen rather than queueing
+ * behind it, and timing out on its own (Material makes snackbars with an action wait indefinitely).
+ */
+fun CoroutineScope.showUndoSnackbar(snackbar: SnackbarHostState, message: String, onUndo: () -> Unit) {
+    launch {
+        snackbar.currentSnackbarData?.dismiss()
+        val result = snackbar.showSnackbar(message, actionLabel = UiStrings.UNDO, duration = SnackbarDuration.Long)
+        if (result == SnackbarResult.ActionPerformed) onUndo()
     }
 }

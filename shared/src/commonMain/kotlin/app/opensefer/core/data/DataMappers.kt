@@ -99,7 +99,7 @@ private fun SchemaDto.sectionLeaves(ref: String, hePath: List<String>): List<Toc
         val secHe = heSectionNames.firstOrNull() ?: secEn
         (1..count).map { i ->
             val numeral = HebrewNumerals.toHebrew(i)
-            val heLabel = "$secHe $numeral"
+            val heLabel = "$secHe ${HebrewNumerals.punctuate(numeral)}"
             TocLeaf(
                 title = "$secEn $i",
                 heTitle = heLabel,
@@ -124,7 +124,7 @@ private fun talmudLeaves(stem: String, amudim: Int, hePath: List<String>): List<
         val daf = i / 2 + 1
         val isAmudA = i % 2 == 0
         val numeral = HebrewNumerals.toHebrew(daf)
-        val heLabel = "דף $numeral ${if (isAmudA) "ע״א" else "ע״ב"}"
+        val heLabel = "דף ${HebrewNumerals.punctuate(numeral)} ${if (isAmudA) "ע״א" else "ע״ב"}"
         val address = "$daf${if (isAmudA) "a" else "b"}"
         TocLeaf(
             title = "Daf $address",

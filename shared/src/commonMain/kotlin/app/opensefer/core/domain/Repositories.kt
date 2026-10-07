@@ -29,7 +29,8 @@ interface TextRepository {
 
     /**
      * Makes sure [tref] is in the on‑device cache (downloading it if needed) without parsing it —
-     * the building block of whole‑book offline downloads.
+     * the building block of whole‑book offline downloads. Succeeds once it's stored, or when Sefaria
+     * has no text there (nothing to keep); fails with [DataError.Storage] when it couldn't be written.
      */
     suspend fun cacheForOffline(tref: String): Result<Unit>
 }
@@ -64,8 +65,16 @@ interface BookmarkRepository {
 
 /** The on‑device copy of every text read or downloaded — so the user can see and free its space. */
 interface OfflineStorage {
+    /**
+     * True when [bookTitle]'s structure is on this device — false after a backup restore, which
+     * brings the library back but not the texts (they are deliberately left out of backups).
+     */
+    suspend fun isStored(bookTitle: String): Boolean
+
     suspend fun sizeBytes(): Long
-    suspend fun clear()
+
+    /** Frees space: deletes every stored text except those of [keepBooks] (the saved books' titles). */
+    suspend fun clearExcept(keepBooks: Set<String>)
 }
 
 /** Title autocomplete for adding a book. */
@@ -84,15 +93,19 @@ interface ReadingPreferencesRepository {
     fun setTheme(theme: ReadingTheme)
     fun setLanguage(language: ReadingLanguage)
     fun setShowNikud(show: Boolean)
+
+    /** Flips [ReadingPreferences.showNikud] against the stored value (two quick taps cancel out). */
+    fun toggleShowNikud()
 }
 
 data class ReadingPreferences(
     val fontScale: Float = 1f,
-    val theme: ReadingTheme = ReadingTheme.Light,
-    val language: ReadingLanguage = ReadingLanguage.Bilingual,
+    val theme: ReadingTheme = ReadingTheme.System,
+    val language: ReadingLanguage = ReadingLanguage.Hebrew,
     val showNikud: Boolean = true,
 )
 
-enum class ReadingTheme { Light, Sepia, Dark }
+/** [System] follows the device's light / dark setting. */
+enum class ReadingTheme { System, Light, Sepia, Dark }
 
 enum class ReadingLanguage { Hebrew, English, Bilingual }

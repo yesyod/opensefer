@@ -21,12 +21,16 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -44,9 +48,11 @@ import app.opensefer.core.model.TocBranch
 import app.opensefer.core.model.TocLeaf
 import app.opensefer.ui.UiStrings
 import app.opensefer.ui.components.IconAction
+import app.opensefer.ui.components.showUndoSnackbar
 import app.opensefer.ui.icons.AppIcons
 import app.opensefer.ui.theme.LocalReadingColors
 import app.opensefer.ui.toc.rememberTocBrowserState
+import app.opensefer.ui.toc.tocGridColumns
 import app.opensefer.ui.toc.tocItems
 
 /**
@@ -64,12 +70,21 @@ fun ContentsSheet(
     onOpen: (TocLeaf) -> Unit,
     onOpenBookmark: (Bookmark) -> Unit,
     onDeleteBookmark: (Bookmark) -> Unit,
+    onRestoreBookmark: (Bookmark) -> Unit,
     onAbout: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val colors = LocalReadingColors.current
     var showBookmarks by rememberSaveable { mutableStateOf(startOnBookmarks) }
     val browser = rememberTocBrowserState(root, currentTref)
+    val columns = tocGridColumns()
+    // The sheet covers the reader's own snackbar, so a deleted bookmark's "undo" shows in here.
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val deleteBookmark = { bookmark: Bookmark ->
+        onDeleteBookmark(bookmark)
+        scope.showUndoSnackbar(snackbar, UiStrings.BOOKMARK_REMOVED) { onRestoreBookmark(bookmark) }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -101,15 +116,18 @@ fun ContentsSheet(
                 ) { showBookmarks = true }
             }
             HorizontalDivider(color = colors.divider)
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 24.dp),
-            ) {
-                if (showBookmarks) {
-                    bookmarkItems(bookmarks, onOpenBookmark, onDeleteBookmark)
-                } else {
-                    tocItems(browser, currentTref, onOpen)
+            Box {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 24.dp),
+                ) {
+                    if (showBookmarks) {
+                        bookmarkItems(bookmarks, onOpenBookmark, deleteBookmark)
+                    } else {
+                        tocItems(browser, currentTref, onOpen, columns)
+                    }
                 }
+                SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
             }
         }
     }
@@ -120,11 +138,13 @@ private fun SheetTab(text: String, selected: Boolean, modifier: Modifier, onClic
     val colors = LocalReadingColors.current
     Column(
         modifier
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
             .clickable(role = Role.Tab, onClick = onClick)
             .semantics { this.selected = selected }
-            .padding(top = 10.dp),
+            .padding(top = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(
             text = text,
@@ -164,7 +184,7 @@ private fun LazyListScope.bookmarkItems(
     }
 }
 
-/** One bookmark: where it is, a line of its text, and a delete button. Shared with the library. */
+/** One bookmark: (its book,) where it is, a line of its text, and a delete button. Shared with the library. */
 @Composable
 fun BookmarkRow(bookmark: Bookmark, showBook: Boolean, onOpen: () -> Unit, onDelete: () -> Unit) {
     val colors = LocalReadingColors.current
@@ -181,8 +201,17 @@ fun BookmarkRow(bookmark: Bookmark, showBook: Boolean, onOpen: () -> Unit, onDel
         ) {
             Icon(AppIcons.Bookmark, contentDescription = null, tint = colors.accent, modifier = Modifier.size(20.dp))
             Column(Modifier.weight(1f)) {
+                if (showBook) {
+                    Text(
+                        text = bookmark.heBookTitle,
+                        color = colors.accent,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Text(
-                    text = if (showBook) "${bookmark.heBookTitle} · ${bookmark.label}" else bookmark.label,
+                    text = bookmark.label,
                     color = colors.text,
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,

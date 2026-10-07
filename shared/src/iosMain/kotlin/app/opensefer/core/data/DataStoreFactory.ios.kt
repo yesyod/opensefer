@@ -21,14 +21,16 @@ internal actual fun dataStoreDir(): String {
 }
 
 /**
- * Saved texts live in Application Support (never purged by the OS) and are flagged
+ * Saved texts live in their own folder in Application Support (never purged by the OS), flagged
  * "do not back up": they are re‑downloadable, so they must not fill the user's iCloud backup
- * (Apple's data storage guidelines).
+ * (Apple's data storage guidelines). Only that folder is flagged — anything else the app keeps in
+ * Application Support is still backed up.
  */
 @OptIn(ExperimentalForeignApi::class)
 internal actual fun diskCacheDir(): String {
+    val manager = NSFileManager.defaultManager
     val support: NSURL = requireNotNull(
-        NSFileManager.defaultManager.URLForDirectory(
+        manager.URLForDirectory(
             directory = NSApplicationSupportDirectory,
             inDomain = NSUserDomainMask,
             appropriateForURL = null,
@@ -36,6 +38,10 @@ internal actual fun diskCacheDir(): String {
             error = null,
         ),
     ) { "No NSApplicationSupportDirectory" }
-    support.setResourceValue(true, forKey = NSURLIsExcludedFromBackupKey, error = null)
-    return requireNotNull(support.path) { "No NSApplicationSupportDirectory path" }
+    val texts: NSURL = requireNotNull(support.URLByAppendingPathComponent(OFFLINE_TEXTS_DIR)) { "No texts folder URL" }
+    manager.createDirectoryAtURL(texts, withIntermediateDirectories = true, attributes = null, error = null)
+    texts.setResourceValue(true, forKey = NSURLIsExcludedFromBackupKey, error = null)
+    return requireNotNull(texts.path) { "No texts folder path" }
 }
+
+private const val OFFLINE_TEXTS_DIR = "OfflineTexts"

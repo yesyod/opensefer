@@ -36,7 +36,6 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.abs
 
 /** Front covers are a little taller than wide, like a real volume. */
 const val COVER_ASPECT_RATIO = 0.68f
@@ -85,17 +84,16 @@ private class CoverPalette(val base: Color, val light: Color, val dark: Color, v
     companion object {
         private val cache = HashMap<String, CoverPalette>()
 
-        fun of(category: String?, title: String): CoverPalette {
-            val key = "${category.orEmpty()}|${title.hashCode() % VARIANTS}"
-            return cache.getOrPut(key) { build(category, title) }
-        }
+        fun of(category: String?, title: String): CoverPalette =
+            cache.getOrPut("${category.orEmpty()}|$title") { build(category, title) }
 
         private fun build(category: String?, title: String): CoverPalette {
-            val hue = category?.let { CategoryColors[it] } ?: FallbackColors[abs(title.hashCode()) % FallbackColors.size]
+            val hash = title.hashCode()
+            val hue = category?.let { CategoryColors[it] } ?: FallbackColors[hash.mod(FallbackColors.size)]
             // Deepen to a dark leather tone (Sefaria's lighter hues can't carry gold lettering)…
             val deep = darkenTo(hue, TARGET_LUMINANCE)
             // …then a small, title‑derived variation so two books of one category aren't identical twins.
-            val variation = ((abs(title.hashCode()) % VARIANTS) - VARIANTS / 2) / (VARIANTS * 12f)
+            val variation = (hash.mod(VARIANTS) - VARIANTS / 2) / (VARIANTS * 12f)
             val base = if (variation >= 0) lerp(deep, Color.White, variation) else lerp(deep, Color.Black, -variation)
             return CoverPalette(
                 base = base,

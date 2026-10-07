@@ -53,6 +53,9 @@ fun segmentKey(tref: String, segment: Int): String = "s:$tref:$segment"
 sealed interface PassageState {
     data object Loading : PassageState
     data class Loaded(val chapter: ChapterText) : PassageState
+
+    /** Sefaria has no text here (an empty daf, an uncommented chapter): it takes no room at all. */
+    data object Empty : PassageState
     data class Failed(val message: String) : PassageState
 }
 
@@ -71,11 +74,15 @@ internal fun buildReaderRows(
             is ReadingHeading -> rows += HeadingRow(item.key, item.depth, item.heTitle)
             is ReadingPassage -> {
                 val index = passageIndex[item.leaf.tref] ?: continue
+                val state = passages[index]
+                val empty = state == PassageState.Empty ||
+                    (state is PassageState.Loaded && state.chapter.segments.isEmpty())
+                if (empty) continue
                 rows += PassageTitleRow(index, item.leaf)
-                when (val state = passages[index]) {
+                when (state) {
                     is PassageState.Loaded -> state.chapter.segments.mapTo(rows) { SegmentRow(index, item.leaf, it) }
                     is PassageState.Failed -> rows += PendingRow(index, item.leaf, state.message)
-                    PassageState.Loading, null -> rows += PendingRow(index, item.leaf)
+                    PassageState.Loading, PassageState.Empty, null -> rows += PendingRow(index, item.leaf)
                 }
             }
         }
@@ -84,36 +91,39 @@ internal fun buildReaderRows(
 }
 
 /**
- * The row index to show for a position: the segment's own row — or the passage title when the
- * position is the very start of a passage ([atPassageStart]: first segment, not scrolled into), so
- * its heading stays visible, or when the segment no longer exists.
+ * The row index to show for a position in [passage]: the segment's own row — or the passage title
+ * when the position is the very start of a passage ([atPassageStart]: first segment, not scrolled
+ * into), so its heading stays visible, or when the segment no longer exists. A passage with no text
+ * (no rows) resolves to the next one that has some.
  */
-internal fun List<ReaderRow>.rowIndexOf(tref: String, segment: Int, atPassageStart: Boolean = true): Int {
-    val segmentRow = indexOfFirst { it is SegmentRow && it.leaf.tref == tref && it.segment.index == segment }
-    val titleRow = indexOfFirst { it is PassageTitleRow && it.leaf.tref == tref }
+internal fun List<ReaderRow>.rowIndexOf(passage: Int, segment: Int, atPassageStart: Boolean = true): Int {
+    val segmentRow = indexOfFirst { it is SegmentRow && it.passage == passage && it.segment.index == segment }
+    val titleRow = indexOfFirst { it is PassageTitleRow && it.passage == passage }
     val isFirstSegment = segmentRow >= 0 && segmentRow == titleRow + 1
     return when {
         segmentRow >= 0 && !(isFirstSegment && atPassageStart) -> segmentRow
         titleRow >= 0 -> titleRow
-        else -> 0
+        else -> indexOfFirst { it.passage > passage }.takeIf { it >= 0 } ?: lastIndex.coerceAtLeast(0)
     }
 }
 
-/** The segment at (or nearest above) row [index] — the "current place" when that row is at the top. */
-internal fun List<ReaderRow>.segmentAtOrBefore(index: Int): SegmentRow? {
-    for (i in index.coerceAtMost(lastIndex) downTo 0) {
-        when (val row = this[i]) {
-            is SegmentRow -> return row
-            is PassageTitleRow, is PendingRow -> return nextSegmentOf(i, row.passage)
-            is HeadingRow -> continue
-        }
+/**
+ * The segment that row [index] stands for — the "current place" when that row is at the top: the
+ * row itself, or (for a passage title, a placeholder, or a section heading) the first segment that
+ * follows it. Null while that passage's text isn't loaded.
+ */
+internal fun List<ReaderRow>.segmentAt(index: Int): SegmentRow? {
+    if (isEmpty()) return null
+    val first = (index.coerceIn(0, lastIndex)..lastIndex).firstOrNull { this[it] !is HeadingRow } ?: return null
+    return when (val row = this[first]) {
+        is SegmentRow -> row
+        else -> nextSegmentOf(first, row.passage)
     }
-    return null
 }
 
 private fun List<ReaderRow>.nextSegmentOf(from: Int, passage: Int): SegmentRow? =
     (from until size).asSequence()
         .map { this[it] }
-        .takeWhile { it.passage == passage || it is HeadingRow }
+        .takeWhile { it.passage == passage }
         .filterIsInstance<SegmentRow>()
         .firstOrNull()

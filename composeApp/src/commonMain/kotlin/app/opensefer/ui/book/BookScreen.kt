@@ -18,12 +18,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -39,10 +44,12 @@ import app.opensefer.ui.components.AppTopBar
 import app.opensefer.ui.components.ErrorState
 import app.opensefer.ui.components.IconAction
 import app.opensefer.ui.components.SectionHeader
+import app.opensefer.ui.components.showUndoSnackbar
 import app.opensefer.ui.icons.AppIcons
 import app.opensefer.ui.library.BookCover
 import app.opensefer.ui.theme.LocalReadingColors
 import app.opensefer.ui.toc.rememberTocBrowserState
+import app.opensefer.ui.toc.tocGridColumns
 import app.opensefer.ui.toc.tocItems
 import org.koin.compose.koinInject
 
@@ -65,9 +72,12 @@ fun BookScreen(
     val viewModel = viewModel { BookViewModel(textRepository, libraryRepository, downloader, title, heTitle) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = LocalReadingColors.current
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         containerColor = colors.background,
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             AppTopBar(title = "", onBack = onBack) {
                 IconAction(AppIcons.Info, UiStrings.ABOUT_BOOK, onAbout)
@@ -76,6 +86,7 @@ fun BookScreen(
     ) { padding ->
         val contents = state.contents
         val browser = contents?.let { rememberTocBrowserState(it.root) }
+        val columns = tocGridColumns()
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp),
@@ -85,7 +96,11 @@ fun BookScreen(
                 BookActions(
                     state = state,
                     onRead = { onRead(null) },
-                    onToggleSaved = viewModel::toggleSaved,
+                    onToggleSaved = {
+                        viewModel.toggleSaved()?.let { removed ->
+                            scope.showUndoSnackbar(snackbar, UiStrings.REMOVED_FROM_LIBRARY) { viewModel.restore(removed) }
+                        }
+                    },
                     onDownload = viewModel::download,
                 )
             }
@@ -98,7 +113,7 @@ fun BookScreen(
                 state.error != null -> item(key = "error") { ErrorState(UiStrings.ERROR_TOC, state.error, viewModel::load) }
                 browser != null -> {
                     item(key = "toc-title") { SectionHeader(UiStrings.CONTENTS) }
-                    tocItems(browser, currentTref = state.saved?.lastTref, onOpen = { onRead(it.tref) })
+                    tocItems(browser, currentTref = state.saved?.lastTref, onOpen = { onRead(it.tref) }, columns = columns)
                 }
             }
         }
@@ -115,7 +130,7 @@ private fun BookHeader(state: BookUiState, contents: BookContents?) {
             category = details?.category ?: state.saved?.category,
             heCategory = details?.heCategory ?: state.saved?.heCategory,
             heAuthor = details?.heAuthor ?: state.saved?.heAuthor,
-            modifier = Modifier.width(112.dp),
+            modifier = Modifier.width(112.dp).clearAndSetSemantics {}, // the title is right beside it
         )
         Column(Modifier.weight(1f).padding(start = 16.dp)) {
             Text(
@@ -134,9 +149,9 @@ private fun BookHeader(state: BookUiState, contents: BookContents?) {
             (details?.heCategory ?: state.saved?.heCategory)?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = colors.secondaryText)
             }
-            contents?.let {
+            contents?.let(::sectionCount)?.let {
                 Text(
-                    text = "${it.leaves.size} ${if (it.isComplex) "קטעים" else "פרקים"}",
+                    text = it,
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.secondaryText,
                     modifier = Modifier.padding(top = 4.dp),
@@ -224,3 +239,32 @@ private fun OfflineLine(saved: LibraryBook, state: BookUiState, onDownload: () -
         }
     }
 }
+
+/**
+ * "50 פרקים", "63 דפים", "12 קטעים" — how big the book is, in its own units; null for a book read as
+ * one piece. A Talmud tractate's leaves are amudim, two to a daf.
+ */
+internal fun sectionCount(contents: BookContents): String? {
+    val count = contents.leaves.size
+    if (count <= 1) return null
+    if (contents.isComplex) return "$count קטעים"
+    return when (val unit = contents.leaves.first().heTitle.substringBefore(' ')) {
+        "דף" -> "${(count + 1) / 2} דפים"
+        else -> "$count ${HebrewPlurals[unit] ?: "קטעים"}"
+    }
+}
+
+private val HebrewPlurals = mapOf(
+    "פרק" to "פרקים",
+    "סימן" to "סימנים",
+    "מזמור" to "מזמורים",
+    "הלכה" to "הלכות",
+    "שער" to "שערים",
+    "מאמר" to "מאמרים",
+    "משנה" to "משניות",
+    "פרשה" to "פרשות",
+    "חלק" to "חלקים",
+    "אות" to "אותיות",
+    "סעיף" to "סעיפים",
+    "שאלה" to "שאלות",
+)

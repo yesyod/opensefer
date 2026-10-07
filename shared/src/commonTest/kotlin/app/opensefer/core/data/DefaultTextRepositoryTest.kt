@@ -190,4 +190,28 @@ class DefaultTextRepositoryTest {
         assertEquals("ראשונים", about.era) // index-derived data is intact
         assertEquals(1, about.editions.size) // editions still present
     }
+
+    @Test
+    fun getAbout_openedOffline_isNotRemembered_soTheBioAppearsOnceBackOnline() = runTest {
+        val aboutIndex = """
+            {"title": "Mishneh Torah, Foundations of the Torah", "heTitle": "משנה תורה, הלכות יסודי התורה",
+             "authors": [{"he": "רמב\"ם", "slug": "rambam"}],
+             "schema": {"depth": 2, "sectionNames": ["Chapter"], "lengths": [10]}}
+        """.trimIndent()
+        var online = false
+        val engine = MockEngine { request ->
+            val path = request.url.encodedPath
+            when {
+                path.contains("/index") -> respond(aboutIndex, HttpStatusCode.OK, jsonHeaders())
+                !online -> throw kotlinx.io.IOException("no network")
+                path.contains("/v2/topics") -> respond("""{"slug":"rambam"}""", HttpStatusCode.OK, jsonHeaders())
+                else -> respond("[]", HttpStatusCode.OK, jsonHeaders())
+            }
+        }
+        val repo = DefaultTextRepository(SefariaApi(createHttpClient(engine)))
+
+        assertNull(repo.getAbout("Mishneh Torah, Foundations of the Torah").getOrThrow().authorBio)
+        online = true
+        assertNotNull(repo.getAbout("Mishneh Torah, Foundations of the Torah").getOrThrow().authorBio)
+    }
 }

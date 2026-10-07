@@ -18,6 +18,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.io.IOException
 import okio.FileSystem
 import okio.Path
+import okio.SYSTEM
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -146,6 +147,45 @@ class OfflineTextRepositoryTest {
 
         val offline = repo { throw IOException("no network") }
         assertEquals(2, offline.getText(tref).getOrThrow().segments.size)
+    }
+
+    @Test
+    fun aSectionWithNoText_countsAsDownloaded_andStaysEmptyOffline() = runTest {
+        var calls = 0
+        val downloading = repo { calls++; json("""{"error": "We have no text for Middot 2a."}""", HttpStatusCode.NotFound) }
+        downloading.cacheForOffline("Middot.2a").getOrThrow() // nothing to keep — and that's a success
+        downloading.cacheForOffline("Middot.2a").getOrThrow()
+        assertEquals(1, calls) // remembered: not asked again
+
+        val offline = repo { throw IOException("no network") }
+        assertIs<DataError.NotFound>(offline.getText("Middot.2a").exceptionOrNull()) // "empty", not "offline"
+    }
+
+    @Test
+    fun cacheForOffline_failsWhenTheDeviceCantStoreIt() = runTest {
+        FileSystem.SYSTEM.write(root) { writeUtf8("not a folder") } // storage unavailable
+        val result = repo { json(textFixture) }.cacheForOffline(tref)
+
+        assertIs<DataError.Storage>(result.exceptionOrNull()) // never "done" with nothing saved
+    }
+
+    @Test
+    fun freeingSpace_keepsTheSavedBooks_andDropsWhatWasMerelyRead() = runTest {
+        val online = repo { request ->
+            if (request.url.encodedPath.contains("/index")) json(indexFixture) else json(textFixture)
+        }
+        online.getContents("Mishneh Torah, Repentance").getOrThrow()
+        online.getText(tref).getOrThrow() // a passage of the saved book
+        online.getText("Genesis.1").getOrThrow() // a book that was only browsed
+
+        online.clearExcept(setOf("Mishneh Torah, Repentance"))
+
+        val offline = repo { throw IOException("no network") }
+        assertTrue(offline.getText(tref).isSuccess)
+        assertTrue(offline.getContents("Mishneh Torah, Repentance").isSuccess)
+        assertIs<DataError.Offline>(offline.getText("Genesis.1").exceptionOrNull())
+        assertTrue(offline.isStored("Mishneh Torah, Repentance"))
+        assertTrue(!offline.isStored("Genesis"))
     }
 
     @Test

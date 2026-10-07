@@ -81,7 +81,6 @@ fun SearchScreen(
     val keyboard = LocalSoftwareKeyboardController.current
     val listState = rememberLazyListState()
 
-    LaunchedEffect(Unit) { if (query.isEmpty()) focus.requestFocus() }
     // Scrolling the results hides the keyboard, so the whole list is reachable.
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }.collect { if (it) keyboard?.hide() }
@@ -91,6 +90,9 @@ fun SearchScreen(
         containerColor = colors.background,
         topBar = { AppTopBar(title = UiStrings.ADD_BOOK, onBack = onBack) },
     ) { padding ->
+        // Here, not above the Scaffold: its content is composed later (during layout), and the field
+        // must be attached before focus can be requested.
+        LaunchedEffect(Unit) { if (query.isEmpty()) focus.requestFocus() }
         Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
             OutlinedTextField(
                 value = query,

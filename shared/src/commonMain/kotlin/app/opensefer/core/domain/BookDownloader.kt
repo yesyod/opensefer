@@ -23,13 +23,16 @@ import kotlinx.coroutines.sync.withLock
  * a few at a time, and marks the book [offline][app.opensefer.core.model.LibraryBook.offline] once all
  * of it is there. [startAutoDownloads] does this automatically for every saved book up to
  * [AUTO_DOWNLOAD_MAX_PASSAGES] passages (larger works — a whole Shulchan Arukh volume — wait for an
- * explicit [download]). Gentle on Sefaria: [PARALLEL] requests at most, one book at a time, and a
- * download stops at the first sign of being offline (it resumes on the next launch or tap).
+ * explicit [download]). Gentle on Sefaria: [PARALLEL] requests at most, one book at a time; a
+ * download stops at the first sign of being offline (or of a full disk), backs off when Sefaria
+ * errors, and resumes from what's stored on the next launch or tap. A section Sefaria has no text
+ * for counts as done, so such a book still completes.
  */
 class BookDownloader(
     private val text: TextRepository,
     private val library: LibraryRepository,
     private val scope: CoroutineScope,
+    private val storage: OfflineStorage,
 ) {
     private val _progress = MutableStateFlow<Map<String, DownloadProgress>>(emptyMap())
 
@@ -63,10 +66,22 @@ class BookDownloader(
         scope.launch {
             library.loaded.first { it }
             delay(startDelayMillis)
+            recheckOfflineBooks()
             library.books
                 .map { books -> books.filterNot { it.offline }.map { it.title }.toSet() }
                 .distinctUntilChanged()
                 .collect { titles -> titles.forEach { title -> prepare(title) } }
+        }
+    }
+
+    /**
+     * The library is backed up with the device but the texts deliberately aren't (ADR 0004): after a
+     * restore a book can say "on the device" with nothing there. Such a book loses the mark — and so
+     * downloads again.
+     */
+    private suspend fun recheckOfflineBooks() {
+        library.books.value.filter { it.offline }.forEach { book ->
+            if (!storage.isStored(book.title)) library.setOffline(book.title, false)
         }
     }
 
@@ -89,7 +104,7 @@ class BookDownloader(
     private suspend fun downloadNow(bookTitle: String) {
         val leaves = text.getContents(bookTitle).getOrNull()?.leaves ?: return
         var done = 0
-        var complete = true
+        var failedRounds = 0
         _progress.update { it + (bookTitle to DownloadProgress(0, leaves.size)) }
         try {
             for (chunk in leaves.chunked(PARALLEL)) {
@@ -98,13 +113,17 @@ class BookDownloader(
                 }
                 done += results.count { it.isSuccess }
                 _progress.update { it + (bookTitle to DownloadProgress(done, leaves.size)) }
-                if (results.any { it.exceptionOrNull() is DataError.Offline }) {
-                    complete = false
-                    break // no connection — don't hammer; the next launch (or tap) resumes from the cache
+                val errors = results.mapNotNull { it.exceptionOrNull() }
+                if (errors.isNotEmpty()) {
+                    // No connection, or no room on the device: stop for now — the next launch (or tap)
+                    // picks up from what's already stored.
+                    if (errors.any { it is DataError.Offline || it is DataError.Storage }) break
+                    // Sefaria is struggling (or rate‑limiting us): ease off, and give up after a few bad rounds.
+                    if (++failedRounds >= MAX_FAILED_ROUNDS) break
+                    delay(FAILURE_BACKOFF_MS)
                 }
-                if (results.any { it.isFailure }) complete = false
             }
-            if (complete) library.setOffline(bookTitle, true)
+            if (done == leaves.size) library.setOffline(bookTitle, true)
         } finally {
             _progress.update { it - bookTitle }
         }
@@ -115,5 +134,7 @@ class BookDownloader(
         const val AUTO_DOWNLOAD_MAX_PASSAGES = 300
         private const val PARALLEL = 3
         private const val AUTO_START_DELAY_MS = 2_000L
+        private const val MAX_FAILED_ROUNDS = 3
+        private const val FAILURE_BACKOFF_MS = 2_000L
     }
 }

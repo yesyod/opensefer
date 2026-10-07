@@ -5,7 +5,6 @@ import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.opensefer.core.domain.ReadingLanguage
@@ -17,14 +16,13 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
-import okio.IOException
 
 /**
  * [ReadingPreferencesRepository] backed by a Preferences DataStore (persists across restarts).
- * Setters stay fire‑and‑forget — DataStore serialises writes; reads recover from a corrupt file
- * via [catch]. Unknown enum values fall back to the default ([toEnum]) so a downgrade never crashes.
+ * Setters stay fire‑and‑forget — DataStore serialises writes; reads survive a corrupt or unreadable
+ * file ([resilientData]). Unknown enum values fall back to the default ([toEnum]) so a downgrade never
+ * crashes.
  */
 class DataStoreReadingPreferencesRepository(
     private val dataStore: DataStore<Preferences>,
@@ -46,12 +44,14 @@ class DataStoreReadingPreferencesRepository(
 
     init {
         scope.launch {
-            dataStore.data
-                .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
-                .collect { prefs ->
+            try {
+                dataStore.resilientData().collect { prefs ->
                     _preferences.value = prefs.toReadingPreferences()
                     _loaded.value = true // after the value, so the first frame already has the real theme
                 }
+            } finally {
+                _loaded.value = true // whatever happened, the app mustn't wait for its settings forever
+            }
         }
     }
 
@@ -59,6 +59,9 @@ class DataStoreReadingPreferencesRepository(
     override fun setTheme(theme: ReadingTheme) = edit { it[Keys.theme] = theme.name }
     override fun setLanguage(language: ReadingLanguage) = edit { it[Keys.language] = language.name }
     override fun setShowNikud(show: Boolean) = edit { it[Keys.showNikud] = show }
+
+    // Flipped inside the transaction, so two quick taps always cancel out (no read of a stale mirror).
+    override fun toggleShowNikud() = edit { it[Keys.showNikud] = !(it[Keys.showNikud] ?: ReadingPreferences().showNikud) }
 
     private fun Preferences.toReadingPreferences(): ReadingPreferences {
         val defaults = ReadingPreferences()

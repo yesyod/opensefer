@@ -1,6 +1,7 @@
 package app.opensefer.core.data
 
 import app.opensefer.core.domain.DataError
+import app.opensefer.core.domain.OfflineStorage
 import app.opensefer.core.domain.TextRepository
 import app.opensefer.core.model.BookAbout
 import app.opensefer.core.model.BookContents
@@ -38,13 +39,16 @@ import kotlinx.serialization.builtins.ListSerializer
  * Parsing (JSON → DTO → domain, including the inline‑HTML parser) runs on [Dispatchers.Default], so
  * the UI thread never pays for it. In‑flight fetches run in [scope], so a caller that goes away (a
  * passage scrolled off screen) doesn't cancel a download another caller is waiting on.
+ *
+ * It is also the [OfflineStorage] behind About's "free up space": it knows which stored files belong
+ * to which book, so the saved books can stay while everything else goes.
  */
 class DefaultTextRepository(
     private val api: SefariaApi,
     private val memory: SectionCache = SectionCache(),
     private val disk: DiskCache? = null,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-) : TextRepository {
+) : TextRepository, OfflineStorage {
 
     private val lock = Mutex() // guards every mutable map below + [memory]
     private val indexMemo = mutableMapOf<String, IndexDto>()
@@ -65,15 +69,52 @@ class DefaultTextRepository(
     }
 
     override suspend fun cacheForOffline(tref: String): Result<Unit> = dataResult {
-        if (disk?.contains(TEXTS, tref) != true) textDto(tref)
-        Unit
+        val store = disk ?: return@dataResult
+        if (store.contains(TEXTS, tref) || store.contains(EMPTY, tref)) return@dataResult
+        val text = try {
+            textDto(tref)
+        } catch (ignored: DataError.NotFound) {
+            return@dataResult // Sefaria has no text here (an empty daf, an uncommented chapter): nothing to keep
+        }
+        // An empty answer isn't stored, and there's nothing to keep; otherwise it must now be on disk.
+        if (text.versions.isNotEmpty() && !store.contains(TEXTS, tref)) throw DataError.Storage()
     }
 
     override suspend fun getAbout(bookTitle: String): Result<BookAbout> = dataResult {
-        lock.withLock { aboutMemo[bookTitle] } ?: loadAbout(bookTitle).also { about ->
-            lock.withLock { aboutMemo[bookTitle] = about }
+        lock.withLock { aboutMemo[bookTitle] } ?: loadAbout(bookTitle).let { (about, complete) ->
+            // Remember it only when nothing was missing — an offline visit mustn't hide the bio for good.
+            if (complete) lock.withLock { aboutMemo[bookTitle] = about }
+            about
         }
     }
+
+    override suspend fun isStored(bookTitle: String): Boolean = disk?.contains(INDEX, bookTitle) == true
+
+    override suspend fun sizeBytes(): Long = disk?.sizeBytes() ?: 0L
+
+    override suspend fun clearExcept(keepBooks: Set<String>) {
+        val store = disk ?: return
+        val kept = HashMap<String, MutableSet<String>>()
+        fun keep(namespace: String, key: String) {
+            kept.getOrPut(namespace) { HashSet() } += key
+        }
+        for (title in keepBooks) {
+            val index = storedIndex(title) ?: continue // never stored → nothing of it on disk
+            keep(INDEX, title)
+            keep(VERSIONS, title)
+            index.authors.mapNotNull { it.slug?.takeUnless(String::isBlank) }.forEach { keep(TOPICS, it) }
+            val leaves = withContext(Dispatchers.Default) { runCatching { index.toBookContents().leaves } }
+            leaves.getOrDefault(emptyList()).forEach {
+                keep(TEXTS, it.tref)
+                keep(EMPTY, it.tref)
+            }
+        }
+        store.retainOnly(kept)
+    }
+
+    /** A book's index as already known on the device — never from the network. */
+    private suspend fun storedIndex(bookTitle: String): IndexDto? =
+        lock.withLock { indexMemo[bookTitle] } ?: disk?.read(INDEX, bookTitle)?.let { decode(IndexDto.serializer(), it) }
 
     private suspend fun chapter(tref: String): ChapterText {
         lock.withLock { memory.get(tref) }?.let { return it }
@@ -82,14 +123,32 @@ class DefaultTextRepository(
         }.also { chapter -> lock.withLock { memory.put(tref, chapter) } }
     }
 
-    private suspend fun textDto(tref: String): V3TextResponseDto = cached(
-        namespace = TEXTS,
-        key = tref,
-        serializer = V3TextResponseDto.serializer(),
-        maxAgeMillis = TEXT_MAX_AGE_MS,
-        shouldStore = { it.versions.isNotEmpty() },
-    ) {
-        api.text(tref).also { if (it.error != null) throw DataError.NotFound() }
+    private suspend fun textDto(tref: String): V3TextResponseDto {
+        // Sefaria has said before that there's no text here (an empty daf): don't ask again, even offline.
+        if (disk?.read(EMPTY, tref, TEXT_MAX_AGE_MS) != null) throw DataError.NotFound()
+        return try {
+            cached(
+                namespace = TEXTS,
+                key = tref,
+                serializer = V3TextResponseDto.serializer(),
+                maxAgeMillis = TEXT_MAX_AGE_MS,
+                shouldStore = { it.versions.isNotEmpty() },
+            ) {
+                api.text(tref).also { if (it.error != null) throw DataError.NotFound() }
+            }
+        } catch (failure: DataError) {
+            throw withEmptyNote(tref, failure)
+        }
+    }
+
+    /**
+     * A "no text here" answer is noted for [tref], so it isn't asked again; and when Sefaria can't be
+     * reached, an older such note still answers (an empty section stays empty offline).
+     */
+    private suspend fun withEmptyNote(tref: String, failure: DataError): DataError = when {
+        failure is DataError.NotFound -> failure.also { disk?.write(EMPTY, tref, EMPTY_MARKER) }
+        disk?.contains(EMPTY, tref) == true -> DataError.NotFound(failure)
+        else -> failure
     }
 
     /** A book's `/api/index`, shared by contents + about so opening a book then its details costs one call. */
@@ -100,7 +159,8 @@ class DefaultTextRepository(
         }.also { index -> lock.withLock { indexMemo[bookTitle] = index } }
     }
 
-    private suspend fun loadAbout(bookTitle: String): BookAbout {
+    /** The book's about data, and whether every part of it is settled (false: shown degraded, not memoized). */
+    private suspend fun loadAbout(bookTitle: String): Pair<BookAbout, Boolean> {
         // The index drives the screen; if it fails, the whole call fails.
         val index = indexOf(bookTitle)
         val base = index.toBookAbout()
@@ -109,19 +169,26 @@ class DefaultTextRepository(
         return coroutineScope {
             val bio = async {
                 authorSlug?.let { slug ->
-                    dataResult {
-                        cached(TOPICS, slug, TopicDto.serializer(), ABOUT_MAX_AGE_MS) { api.topic(slug) }
-                    }.getOrNull()?.toAuthorBio()
+                    dataResult { cached(TOPICS, slug, TopicDto.serializer(), ABOUT_MAX_AGE_MS) { api.topic(slug) } }
                 }
             }
             val editions = async {
                 dataResult {
                     cached(VERSIONS, bookTitle, VersionsSerializer, ABOUT_MAX_AGE_MS) { api.versions(bookTitle) }
-                }.getOrNull()?.toEditions().orEmpty()
+                }
             }
-            base.copy(authorBio = bio.await(), editions = editions.await())
+            val bioResult = bio.await()
+            val editionsResult = editions.await()
+            val about = base.copy(
+                authorBio = bioResult?.getOrNull()?.toAuthorBio(),
+                editions = editionsResult.getOrNull()?.toEditions().orEmpty(),
+            )
+            about to ((bioResult?.isSettled() ?: true) && editionsResult.isSettled())
         }
     }
+
+    /** Answered for good: a value, or Sefaria saying there's none (unlike being offline, worth remembering). */
+    private fun Result<*>.isSettled(): Boolean = isSuccess || exceptionOrNull() is DataError.NotFound
 
     /**
      * Cache‑first fetch of one resource: a fresh disk entry is served as‑is; otherwise the network is
@@ -145,11 +212,11 @@ class DefaultTextRepository(
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (notFound: DataError.NotFound) {
-            throw notFound // a real answer, not an outage — no stale fallback
         } catch (expected: Exception) {
+            val error = expected.toDataError() // HTTP 404 and an HTTP‑200 {"error"} alike are NotFound
+            if (error is DataError.NotFound) throw error // a real answer, not an outage — no stale fallback
             // Offline (or Sefaria is down): an old copy beats an error.
-            disk?.read(namespace, key)?.let { decode(serializer, it) } ?: throw expected
+            disk?.read(namespace, key)?.let { decode(serializer, it) } ?: throw error
         }
     }
 
@@ -178,6 +245,8 @@ class DefaultTextRepository(
         const val INDEX = "index"
         const val TOPICS = "topics"
         const val VERSIONS = "versions"
+        const val EMPTY = "empty" // refs Sefaria has no text for
+        const val EMPTY_MARKER = "{}"
         const val DAY_MS = 24L * 60 * 60 * 1000
         const val TEXT_MAX_AGE_MS = 30 * DAY_MS
         const val INDEX_MAX_AGE_MS = 7 * DAY_MS

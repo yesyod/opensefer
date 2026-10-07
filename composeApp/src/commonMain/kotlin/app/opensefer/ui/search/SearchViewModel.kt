@@ -36,6 +36,9 @@ class SearchViewModel(
 
     private var searchJob: Job? = null
 
+    // Books removed here this session: tapping save again restores them as they were (place kept).
+    private val removed = mutableMapOf<String, LibraryBook>()
+
     init {
         viewModelScope.launch {
             libraryRepository.books.collect { books ->
@@ -64,12 +67,14 @@ class SearchViewModel(
         }
     }
 
-    /** One‑tap save from the results; tapping again removes it. */
+    /** One‑tap save from the results; tapping again removes it (and a third tap brings it back intact). */
     fun toggleSaved(result: BookSearchResult) {
-        if (result.title in _state.value.savedTitles) {
+        val saved = libraryRepository.books.value.firstOrNull { it.title == result.title }
+        if (saved != null) {
+            removed[result.title] = saved
             libraryRepository.remove(result.title)
         } else {
-            libraryRepository.add(LibraryBook(result.title, result.heTitle))
+            libraryRepository.add(removed.remove(result.title) ?: LibraryBook(result.title, result.heTitle))
         }
     }
 

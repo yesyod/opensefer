@@ -15,6 +15,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import okio.FileSystem
 import okio.Path
+import okio.SYSTEM
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -69,5 +70,22 @@ class DataStoreBookmarkRepositoryTest {
         repo.remove(bookmarkId("Genesis.1", 0))
         val one = repo.bookmarks.first { it.size == 1 }
         assertEquals(bookmarkId("Genesis.1", 1), one.single().id)
+    }
+
+    @Test
+    fun aRemovedBookmarkPutBack_returnsToItsPlaceInTheList() = runTest {
+        var now = 1L
+        val repo = DataStoreBookmarkRepository(storeOn(backgroundScope), backgroundScope, clock = { now++ })
+        repo.add(mark("Genesis.1", 0))
+        repo.add(mark("Genesis.2", 0))
+        repo.add(mark("Genesis.3", 0))
+        val three = repo.bookmarks.first { it.size == 3 }
+
+        val middle = three[1]
+        repo.remove(middle.id)
+        repo.bookmarks.first { it.size == 2 }
+        repo.add(middle) // the undo: it still has its createdAt
+
+        assertEquals(three, repo.bookmarks.first { it.size == 3 })
     }
 }

@@ -4,5 +4,5 @@ import androidx.compose.runtime.Composable
 
 @Composable
 actual fun SystemBarsEffect(darkIcons: Boolean) {
-    // iOS picks the status bar style from the hosting view controller; nothing to do here.
+    // The status bar is hidden on iOS (Info.plist: UIStatusBarHidden) — there's nothing to colour.
 }

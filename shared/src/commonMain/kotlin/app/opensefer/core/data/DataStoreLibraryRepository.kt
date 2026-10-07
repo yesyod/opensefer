@@ -3,7 +3,6 @@ package app.opensefer.core.data
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.opensefer.core.domain.LibraryRepository
 import app.opensefer.core.model.LibraryBook
@@ -14,11 +13,9 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
-import okio.IOException
 
 /**
  * [LibraryRepository] backed by a Preferences DataStore — the user's saved books, their exact resume
@@ -44,17 +41,24 @@ class DataStoreLibraryRepository(
 
     init {
         scope.launch {
-            dataStore.data
-                .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
-                .collect { prefs ->
+            try {
+                dataStore.resilientData().collect { prefs ->
                     _books.value = prefs.decodeBooks()
                     _loaded.value = true // after the books, so `loaded` never exposes the empty placeholder
                 }
+            } finally {
+                _loaded.value = true // whatever happened, the app mustn't wait for the library forever
+            }
         }
     }
 
+    /** Adds [book] — keeping its [LibraryBook.addedAt] when it has one (an undo puts it back in place). */
     override fun add(book: LibraryBook) = mutate { current ->
-        if (current.any { it.title == book.title }) current else current + book.copy(addedAt = clock())
+        when {
+            current.any { it.title == book.title } -> current
+            book.addedAt > 0 -> current + book
+            else -> current + book.copy(addedAt = clock())
+        }
     }
 
     override fun remove(title: String) = mutate { it.filterNot { book -> book.title == title } }
@@ -115,7 +119,7 @@ class DataStoreLibraryRepository(
                 title = "Mishneh Torah, Foundations of the Torah",
                 heTitle = "משנה תורה, הלכות יסודי התורה",
                 lastTref = "Mishneh_Torah,_Foundations_of_the_Torah.1",
-                lastLabel = "פרק א",
+                lastLabel = "פרק א׳",
                 category = "Halakhah",
                 heCategory = "הלכה",
                 heAuthor = "רמב״ם",
@@ -124,7 +128,7 @@ class DataStoreLibraryRepository(
                 title = "Mishneh Torah, Repentance",
                 heTitle = "משנה תורה, הלכות תשובה",
                 lastTref = "Mishneh_Torah,_Repentance.1",
-                lastLabel = "פרק א",
+                lastLabel = "פרק א׳",
                 category = "Halakhah",
                 heCategory = "הלכה",
                 heAuthor = "רמב״ם",

@@ -9,12 +9,16 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import okio.FileSystem
+import okio.IOException
 import okio.Path
+import okio.SYSTEM
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -83,6 +87,28 @@ class DataStoreLibraryRepositoryTest {
             .first { it.title == "Berakhot" }
         assertEquals("Talmud", book.category)
         assertEquals("תלמוד", book.heCategory)
+    }
+
+    @Test
+    fun aBookPutBack_keepsItsPlaceOnTheShelf() = runTest {
+        val repo = DataStoreLibraryRepository(storeOn(backgroundScope), backgroundScope, clock = { 99L })
+        repo.add(LibraryBook("Berakhot", "ברכות", addedAt = 5L)) // an undo hands back the original
+
+        val book = repo.books.first { list -> list.any { it.title == "Berakhot" } }.first { it.title == "Berakhot" }
+        assertEquals(5L, book.addedAt)
+    }
+
+    @Test
+    fun anUnreadableLibrary_stillLoads_withTheDefaults_insteadOfLeavingTheAppBlank() = runTest {
+        val broken = object : DataStore<Preferences> {
+            override val data: Flow<Preferences> = flow { throw IOException("corrupt file") }
+            override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences =
+                throw IOException("corrupt file")
+        }
+        val repo = DataStoreLibraryRepository(broken, backgroundScope)
+
+        repo.loaded.first { it }
+        assertEquals(DataStoreLibraryRepository.DEFAULT_BOOKS, repo.books.value)
     }
 
     @Test

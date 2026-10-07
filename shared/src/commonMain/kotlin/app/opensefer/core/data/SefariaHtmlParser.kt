@@ -144,21 +144,27 @@ object SefariaHtmlParser {
         }
     }
 
-    private val NumericEntity = Regex("&#([xX][0-9a-fA-F]{1,6}|[0-9]{1,7});")
+    private val Entity = Regex("&(#[xX][0-9a-fA-F]{1,6}|#[0-9]{1,7}|[a-zA-Z]{2,8});")
 
+    private val NamedEntities = mapOf(
+        "amp" to "&", "lt" to "<", "gt" to ">", "quot" to "\"", "apos" to "'",
+        "nbsp" to " ", "thinsp" to " ", "ensp" to " ", "emsp" to " ",
+        "mdash" to "—", "ndash" to "–", "hellip" to "…",
+        "lsquo" to "‘", "rsquo" to "’", "ldquo" to "“", "rdquo" to "”", "laquo" to "«", "raquo" to "»",
+        "shy" to "\u00AD", "lrm" to "\u200E", "rlm" to "\u200F", "zwj" to "\u200D", "zwnj" to "\u200C",
+    )
+
+    /**
+     * Decodes character references in ONE pass, so the "&" that one produces can never start another:
+     * "&amp;lt;" and "&#38;lt;" both stay the literal text "&lt;". Unknown or invalid ones are kept verbatim.
+     */
     private fun decodeEntities(s: String): String {
         if ('&' !in s) return s
-        // Resolve &amp; LAST so a double-escaped "&amp;lt;" stays "&lt;" instead of becoming "<".
-        return s
-            .replace(NumericEntity) { match -> decodeCodePoint(match.groupValues[1]) ?: match.value }
-            .replace("&nbsp;", " ")
-            .replace("&thinsp;", " ")
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&quot;", "\"")
-            .replace("&#39;", "'")
-            .replace("&apos;", "'")
-            .replace("&amp;", "&")
+        return s.replace(Entity) { match ->
+            val name = match.groupValues[1]
+            val decoded = if (name[0] == '#') decodeCodePoint(name.substring(1)) else NamedEntities[name]
+            decoded ?: match.value
+        }
     }
 
     /** `&#1488;` / `&#x5D0;` → "א"; null for an invalid code point (the entity is then kept verbatim). */

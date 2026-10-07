@@ -29,13 +29,24 @@ away. Readers want the books they keep — and anything they've opened — to op
 Parsing runs on `Dispatchers.Default`, file IO on `Dispatchers.IO`. Failures map to a small domain
 `DataError` (Offline / NotFound / Server) that the UI turns into Hebrew messages.
 
-`BookDownloader` keeps **saved** books fully on the device: it downloads every passage (three at a
-time, one book at a time, stopping at the first sign of being offline) and marks the book `offline`.
-Saved books up to 300 passages download automatically; bigger ones on request.
+A section Sefaria has **no text** for (it answers HTTP 404 — an empty daf, an uncommented chapter) is
+noted in an `empty` namespace: it is not asked for again, stays "empty" (not "offline") without a
+connection, takes no room in the reader, and counts as done for a download.
 
-**Where:** Android `Context.noBackupFilesDir` (persistent, excluded from Auto Backup); iOS Application
-Support, flagged `NSURLIsExcludedFromBackupKey`. Both are re‑downloadable content the OS shouldn't back
-up; neither is purged behind the user's back. About → "on‑device texts" shows the size and clears it.
+`BookDownloader` keeps **saved** books fully on the device: it downloads every passage (three at a
+time, one book at a time), marks the book `offline` only once every passage is really on disk (a write
+that fails — a full disk — is a failure, not a success), stops at the first sign of being offline or
+of a full disk, and eases off — then gives up for now — when Sefaria keeps erroring. Saved books up to
+300 passages download automatically; bigger ones on request.
+
+**Where:** Android `Context.noBackupFilesDir` (persistent, excluded from Auto Backup); iOS
+`Application Support/OfflineTexts`, flagged `NSURLIsExcludedFromBackupKey` (only that folder). Both are
+re‑downloadable content the OS shouldn't back up; neither is purged behind the user's back. Because the
+*library* is backed up but the texts aren't, a book marked `offline` whose index isn't on the device
+(after a restore) loses the mark at startup and downloads again.
+
+**Freeing space:** About shows the size used; "free up space" (after a confirmation) deletes everything
+except the saved books' texts, indexes and "about" data.
 
 ## Alternatives considered
 
@@ -51,6 +62,7 @@ up; neither is purged behind the user's back. About → "on‑device texts" show
 ## Consequences
 
 - Books reopen instantly and read offline; the library shows which are fully on the device.
-- Disk use grows with reading (a few KB per passage); the user can free it from About.
-- Tests cover the disk tier, stale fallback, error‑answer handling, de‑duplication and downloads
-  (`DiskCacheTest`, `OfflineTextRepositoryTest`, `BookDownloaderTest`).
+- Disk use grows with reading (a few KB per passage); the user can free it from About without losing
+  the books they saved.
+- Tests cover the disk tier, stale fallback, error‑answer handling, empty sections, freeing space,
+  de‑duplication and downloads (`DiskCacheTest`, `OfflineTextRepositoryTest`, `BookDownloaderTest`).

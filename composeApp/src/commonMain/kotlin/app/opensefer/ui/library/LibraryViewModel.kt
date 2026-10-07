@@ -50,14 +50,22 @@ class LibraryViewModel(
         downloads = downloads,
     )
 
-    fun remove(book: LibraryBook) = library.remove(book.title)
+    /** Removes [book]; returns it as it was at that moment, for [undoRemove]. */
+    fun remove(book: LibraryBook): LibraryBook {
+        val current = library.books.value.firstOrNull { it.title == book.title } ?: book
+        library.remove(book.title)
+        return current
+    }
 
-    /** Puts a just‑removed book back exactly as it was (position and all). */
+    /** Puts a just‑removed book back exactly as it was (position, place on the shelf and all). */
     fun undoRemove(book: LibraryBook) = library.add(book)
 
     fun download(book: LibraryBook) = downloader.download(book.title)
 
     fun removeBookmark(bookmark: Bookmark) = bookmarkRepository.remove(bookmark.id)
+
+    /** Puts a just‑removed bookmark back where it was in the list. */
+    fun restoreBookmark(bookmark: Bookmark) = bookmarkRepository.add(bookmark)
 
     private companion object {
         const val STOP_TIMEOUT_MS = 5_000L

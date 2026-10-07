@@ -1,5 +1,6 @@
 package app.opensefer.ui.reader
 
+import app.opensefer.core.data.HebrewNumerals
 import app.opensefer.core.domain.ReadingLanguage
 import app.opensefer.core.model.ChapterText
 import app.opensefer.core.model.RichText
@@ -13,7 +14,7 @@ internal data class CopyPart(val leaf: TocLeaf, val chapter: ChapterText, val se
 
 /**
  * The text put on the clipboard for "copy": the selected segments in the languages on screen
- * (nikud stripped when it's hidden), followed by a source line such as `(בראשית א׳:א-ג)` —
+ * (nikud stripped when it's hidden), followed by a source line such as `(בראשית א׳:א׳-ג׳)` —
  * so a pasted quote always says where it's from.
  */
 internal fun buildCopyText(
@@ -36,14 +37,16 @@ internal fun buildCopyText(
     return body.joinToString(separator) + "\n(" + source + ")"
 }
 
-/** `בראשית א׳:ג`, `בראשית א׳:ג-ה`, `ברכות ב׳ א:ד, ו` — Sefaria's ref with the segment labels. */
+/** `בראשית א׳:ג׳`, `בראשית א׳:ג׳-ה׳`, `ברכות ב׳ א:ד׳, ו׳` — Sefaria's ref with the segment labels. */
 internal fun citation(heBookTitle: String, part: CopyPart, english: Boolean): String {
     val ref = if (english) {
         part.chapter.ref ?: part.leaf.title
     } else {
         part.chapter.heRef ?: "$heBookTitle, ${part.leaf.heTitle}"
     }
-    val labels = part.segments.filterNot { it.isRubric }.map { if (english) it.enLabel else it.label }
+    val labels = part.segments.filterNot { it.isRubric }.map {
+        if (english) it.enLabel else HebrewNumerals.punctuate(it.label)
+    }
     val consecutive = part.segments.zipWithNext().all { (a, b) -> b.index == a.index + 1 }
     val range = when {
         labels.isEmpty() -> null
@@ -55,11 +58,11 @@ internal fun citation(heBookTitle: String, part: CopyPart, english: Boolean): St
 }
 
 /**
- * A short human label for a place in a book, e.g. `פרק ב, הלכה ג` — shown on bookmarks and in the
+ * A short human label for a place in a book, e.g. `פרק ב׳, הלכה ג׳` — shown on bookmarks and in the
  * library's "continue reading". [segmentName] is the book's name for one segment, when known.
  */
 internal fun placeLabel(leaf: TocLeaf, segment: Segment?, segmentName: String?): String {
-    val marker = segment?.label?.takeIf { it.isNotBlank() } ?: return leaf.heTitle
+    val marker = segment?.label?.takeIf { it.isNotBlank() }?.let(HebrewNumerals::punctuate) ?: return leaf.heTitle
     return if (segmentName != null) "${leaf.heTitle}, $segmentName $marker" else "${leaf.heTitle}, $marker"
 }
 

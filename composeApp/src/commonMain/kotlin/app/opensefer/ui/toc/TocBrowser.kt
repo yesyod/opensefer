@@ -19,9 +19,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -35,11 +37,13 @@ import app.opensefer.ui.theme.LocalReadingColors
 
 /**
  * Where a drill‑down through a book's structure is: a stack of branches from the root. Opens on the
- * branch holding [initialTref] (the passage being read), so the reader's place is one glance away.
+ * branch holding the passage being read, so the reader's place is one glance away.
  */
 @Stable
-class TocBrowserState(root: TocBranch, initialTref: String?) {
-    val stack = mutableStateListOf<TocBranch>().apply { addAll(pathTo(root, initialTref) ?: listOf(root)) }
+class TocBrowserState private constructor(initial: List<TocBranch>) {
+    constructor(root: TocBranch, initialTref: String?) : this(pathTo(root, initialTref) ?: listOf(root))
+
+    val stack = mutableStateListOf<TocBranch>().apply { addAll(initial) }
     val current: TocBranch get() = stack.last()
     val canGoUp: Boolean get() = stack.size > 1
 
@@ -50,11 +54,33 @@ class TocBrowserState(root: TocBranch, initialTref: String?) {
     fun up() {
         if (canGoUp) stack.removeAt(stack.lastIndex)
     }
+
+    /** The drill‑down as child positions from the root — small, and saveable. */
+    internal fun indexPath(): List<Int> =
+        stack.zipWithNext { parent, child -> parent.children.indexOfFirst { it === child } }
+
+    companion object {
+        /** Keeps the drill‑down when the screen leaves composition (opening a chapter, then coming back). */
+        fun saver(root: TocBranch): Saver<TocBrowserState, List<Int>> = Saver(
+            save = { it.indexPath() },
+            restore = { path -> TocBrowserState(branchesAt(root, path)) },
+        )
+    }
 }
 
 @Composable
 fun rememberTocBrowserState(root: TocBranch, initialTref: String? = null): TocBrowserState =
-    remember(root) { TocBrowserState(root, initialTref) }
+    rememberSaveable(root, saver = TocBrowserState.saver(root)) { TocBrowserState(root, initialTref) }
+
+/** Columns of the chapter grid: fewer, wider chips when the system font is large. */
+@Composable
+fun tocGridColumns(): Int = if (LocalDensity.current.fontScale > LARGE_FONT_SCALE) LARGE_FONT_COLUMNS else GRID_COLUMNS
+
+private fun branchesAt(root: TocBranch, path: List<Int>): List<TocBranch> {
+    val branches = mutableListOf(root)
+    for (i in path) branches += branches.last().children.getOrNull(i) as? TocBranch ?: break
+    return branches
+}
 
 /** The branches from [root] down to the one directly containing [tref]; null if it isn't in the book. */
 private fun pathTo(root: TocBranch, tref: String?): List<TocBranch>? {
@@ -73,6 +99,8 @@ private fun pathTo(root: TocBranch, tref: String?): List<TocBranch>? {
 }
 
 private const val GRID_COLUMNS = 6
+private const val LARGE_FONT_COLUMNS = 4
+private const val LARGE_FONT_SCALE = 1.3f
 
 /**
  * The table of contents as lazy‑list items: a breadcrumb while inside a section, then either a compact
@@ -83,6 +111,7 @@ fun LazyListScope.tocItems(
     state: TocBrowserState,
     currentTref: String?,
     onOpen: (TocLeaf) -> Unit,
+    columns: Int = GRID_COLUMNS,
 ) {
     val branch = state.current
     if (state.canGoUp) {
@@ -92,12 +121,12 @@ fun LazyListScope.tocItems(
     val isChapterGrid = leaves.size == branch.children.size && leaves.size > 1 &&
         leaves.all { it.shortLabel.length <= SHORT_LABEL_MAX }
     if (isChapterGrid) {
-        items(leaves.chunked(GRID_COLUMNS), key = { "toc-grid-${it.first().tref}" }) { rowLeaves ->
+        items(leaves.chunked(columns), key = { "toc-grid-${it.first().tref}" }) { rowLeaves ->
             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 rowLeaves.forEach { leaf ->
                     ChapterChip(leaf, current = leaf.tref == currentTref, onClick = { onOpen(leaf) }, Modifier.weight(1f))
                 }
-                repeat(GRID_COLUMNS - rowLeaves.size) { Spacer(Modifier.weight(1f)) }
+                repeat(columns - rowLeaves.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     } else {

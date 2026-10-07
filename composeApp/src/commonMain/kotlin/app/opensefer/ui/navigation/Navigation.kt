@@ -55,7 +55,9 @@ class Navigator internal constructor(entries: List<Pair<String, Destination>>) {
     val current: NavEntry get() = backStack.last()
     val canGoBack: Boolean get() = backStack.size > 1
 
+    /** Pushes [destination] — unless it's already on top (a double tap must not open a screen twice). */
     fun goTo(destination: Destination) {
+        if (backStack.lastOrNull()?.destination == destination) return
         backStack.add(NavEntry("$ID_PREFIX${nextId++}", destination))
     }
 

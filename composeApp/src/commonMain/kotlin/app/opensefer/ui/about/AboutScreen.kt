@@ -5,10 +5,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -42,6 +44,7 @@ fun AboutScreen(
     val colors = LocalReadingColors.current
     val scope = rememberCoroutineScope()
     var savedBytes by remember { mutableStateOf<Long?>(null) }
+    var confirmFreeSpace by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { savedBytes = storage.sizeBytes() }
 
     Scaffold(containerColor = colors.background, topBar = { AppTopBar(UiStrings.ABOUT, onBack = onBack) }) { padding ->
@@ -70,16 +73,10 @@ fun AboutScreen(
                 colors.secondaryText,
             )
             OutlinedButton(
-                onClick = {
-                    scope.launch {
-                        storage.clear()
-                        library.books.value.forEach { library.setOffline(it.title, false) }
-                        savedBytes = storage.sizeBytes()
-                    }
-                },
+                onClick = { confirmFreeSpace = true },
                 enabled = (savedBytes ?: 0L) > 0L,
                 modifier = Modifier.padding(top = 8.dp),
-            ) { Text(UiStrings.CLEAR_SAVED_TEXTS, color = colors.accent) }
+            ) { Text(UiStrings.FREE_SPACE, color = colors.accent) }
             Paragraph("רישיון", MaterialTheme.typography.titleMedium, colors.text)
             Paragraph(
                 "קוד האפליקציה מופץ ברישיון Apache‑2.0. בקוד המקור תמצאו פרטי ייחוס והנחיות לתרומה.",
@@ -88,6 +85,35 @@ fun AboutScreen(
             )
         }
     }
+
+    if (confirmFreeSpace) {
+        FreeSpaceDialog(
+            onConfirm = {
+                confirmFreeSpace = false
+                scope.launch {
+                    // The saved books stay whole on the device; only what was merely read goes.
+                    storage.clearExcept(library.books.value.mapTo(HashSet()) { it.title })
+                    savedBytes = storage.sizeBytes()
+                }
+            },
+            onDismiss = { confirmFreeSpace = false },
+        )
+    }
+}
+
+@Composable
+private fun FreeSpaceDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val colors = LocalReadingColors.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(UiStrings.FREE_SPACE_TITLE) },
+        text = { Text(UiStrings.FREE_SPACE_BODY) },
+        confirmButton = { TextButton(onClick = onConfirm) { Text(UiStrings.FREE_SPACE, color = colors.accent) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(UiStrings.CANCEL, color = colors.accent) } },
+        containerColor = colors.surface,
+        titleContentColor = colors.text,
+        textContentColor = colors.secondaryText,
+    )
 }
 
 private const val KB = 1024.0

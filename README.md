@@ -33,11 +33,11 @@ The complete design rationale lives in **[BLUEPRINT.md](BLUEPRINT.md)** — read
 - **Your library, as a shelf of covers** — the home screen shows only the books you saved, each with a generated, category‑coloured **book cover** (leather board, spine on the right, gold lettering), reading progress and an "available offline" mark. A **continue reading** card sits on top; tap any cover to resume exactly where you stopped; long‑press for its contents, offline download or removal (with undo).
 - **One‑tap save** — save a book from search, from its book page or from inside the reader.
 - **Offline‑first** — every index and passage you open is kept on the device (memory → disk → network), so books reopen instantly and stay readable without a connection; saved books download completely in the background. See [ADR 0004](docs/adr/0004-offline-first-text-storage.md).
-- **Copy a passage** — long‑press to select words, or tap verse numbers to pick whole verses and copy them **with their source** (e.g. `(בראשית א׳:א-ג)`).
-- **Bookmarks at exact places** — bookmark any verse/halacha (or "here" from the top bar); find them in the reader's contents sheet and on the home screen.
+- **Copy a passage** — tap a verse (or several) to select it and copy **with its source** (e.g. `(בראשית א׳:א׳-ג׳)`); long‑press still selects single words.
+- **Bookmarks at exact places** — bookmark a selected verse/halacha (or "here" from the top bar); find them in the reader's contents sheet and on the home screen. Removing a book or a bookmark can always be undone.
 - **Exact resume** — the reader reopens on the very segment (and scroll offset) you were reading.
 - **Built for Hebrew** — a right‑to‑left Hebrew interface, first‑class BiDi (English stays left‑to‑right), and a client‑side **nikud** (vowels) toggle; Talmud tractates are addressed by daf and amud (ב. / ב:).
-- **A real reading experience** — one continuous scroll through the whole book, adjustable text size, **Hebrew / English / bilingual** display, three reading **themes** (light · sepia · dark), a top bar that slides away while you read, and a chapter grid / section tree a tap away.
+- **A real reading experience** — one continuous scroll through the whole book, adjustable text size, **Hebrew / English / bilingual** display, reading **themes** (automatic · light · sepia · dark), a top bar that slides away while you read (on Android), and a chapter grid / section tree a tap away.
 - **Segment‑addressable** — every halacha/verse is an individually addressable unit, so commentaries (Phase 2) drop in without reworking the reader.
 
 ## 🚀 Quick start
@@ -125,7 +125,7 @@ Exact versions are pinned in [`gradle/libs.versions.toml`](gradle/libs.versions.
 **Working today:** Library shelf with generated covers · Search (Sefaria autocomplete, one‑tap save) · Book page (chapter grid / section tree) · **continuous reader** — the whole book scrolls as one stream, one row per segment (simple *and* complex books such as a Siddur; Talmud by daf/amud), RTL Hebrew + LTR English, numbered segments (instruction rubrics un‑numbered), copy with source, bookmarks, font scaling, themes, nikud toggle · **offline‑first text storage** with background download of saved books · **everything persists across restarts** (settings, library, exact reading position, bookmarks — Jetpack DataStore) · About/attribution.
 
 **Documented next steps** (interfaces already in place):
-- **Phase 2 — Commentaries:** tap a segment → bottom sheet of commentators → open via the existing reader path (`/api/links`).
+- **Phase 2 — Commentaries:** select a segment → "commentaries" in the selection bar → bottom sheet of commentators → open via the existing reader path (`/api/links`).
 - Bundle a dedicated nikud font (Frank Ruhl Libre, SIL OFL); footnote‑in‑sheet UX; side‑by‑side bilingual; convention‑plugin module split; tests + CI.
 
 See [BLUEPRINT §14](BLUEPRINT.md) for the full milestone plan.

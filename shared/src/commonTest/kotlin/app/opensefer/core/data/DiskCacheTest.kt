@@ -3,6 +3,7 @@ package app.opensefer.core.data
 import kotlinx.coroutines.test.runTest
 import okio.FileSystem
 import okio.Path
+import okio.SYSTEM
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -78,6 +79,48 @@ class DiskCacheTest {
 
         assertNull(cache.read("texts", "Genesis.1"))
         assertEquals(0L, cache.sizeBytes())
+    }
+
+    @Test
+    fun anEntryFromTheFuture_isStale_butStillAnOfflineFallback() = runTest {
+        val cache = DiskCache(root, clock = { 0L }) // the clock was moved back after the write
+        cache.write("texts", "Genesis.1", "v1")
+
+        assertNull(cache.read("texts", "Genesis.1", maxAgeMillis = 1_000))
+        assertEquals("v1", cache.read("texts", "Genesis.1"))
+    }
+
+    @Test
+    fun aWriteThatCantLand_saysSo() = runTest {
+        FileSystem.SYSTEM.write(root) { writeUtf8("not a folder") } // nowhere to create entries
+        val cache = DiskCache(root)
+
+        assertFalse(cache.write("texts", "Genesis.1", "v1"))
+        assertFalse(cache.contains("texts", "Genesis.1"))
+    }
+
+    @Test
+    fun anEmptyFile_doesNotCountAsStored() = runTest {
+        val cache = DiskCache(root)
+        assertTrue(cache.write("texts", "Genesis.1", ""))
+
+        assertFalse(cache.contains("texts", "Genesis.1"))
+    }
+
+    @Test
+    fun retainOnly_keepsWhatIsListed_andFreesTheRest() = runTest {
+        val cache = DiskCache(root)
+        cache.write("texts", "Genesis.1", "keep")
+        cache.write("texts", "Exodus.1", "drop")
+        cache.write("index", "Genesis", "keep")
+        cache.write("topics", "rambam", "drop")
+
+        cache.retainOnly(mapOf("texts" to setOf("Genesis.1"), "index" to setOf("Genesis")))
+
+        assertEquals("keep", cache.read("texts", "Genesis.1"))
+        assertEquals("keep", cache.read("index", "Genesis"))
+        assertNull(cache.read("texts", "Exodus.1"))
+        assertNull(cache.read("topics", "rambam"))
     }
 
     /** The real wall clock (modification times are wall‑clock based). */

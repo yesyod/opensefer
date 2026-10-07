@@ -2,7 +2,8 @@ package app.opensefer.core.data
 
 /**
  * Converts integers to Hebrew numerals (gematria) for segment/chapter labels — e.g. 1 → "א",
- * 15 → "טו", 16 → "טז", 21 → "כא". Handles the special 15/16 cases (טו/טז, not יה/יו).
+ * 15 → "טו", 16 → "טז", 21 → "כא". Handles the special 15/16 cases (טו/טז, not יה/יו). Bare letters
+ * suit the margin and the chapter grid; [punctuate] gives the form used in running text ("כ״א").
  */
 object HebrewNumerals {
 
@@ -36,4 +37,22 @@ object HebrewNumerals {
         }
         return sb.toString()
     }
+
+    /**
+     * A bare numeral as written in running text: a geresh after a single letter (א׳), gershayim
+     * before the last of several (ל״א, קכ״ו) — so "פרק לא" (chapter 31) can't be misread as "no".
+     * Each part of a multi‑level label is marked on its own ("א:ב" → "א׳:ב׳"); anything that isn't a
+     * Hebrew numeral is returned as it is.
+     */
+    fun punctuate(numeral: String): String = numeral.split(':').joinToString(":") { part ->
+        when {
+            part.isEmpty() || part.any { it !in HEBREW_LETTERS } -> part
+            part.length == 1 -> part + GERESH
+            else -> part.dropLast(1) + GERSHAYIM + part.last()
+        }
+    }
+
+    private val HEBREW_LETTERS = '\u05D0'..'\u05EA'
+    private const val GERESH = '\u05F3'
+    private const val GERSHAYIM = '\u05F4'
 }

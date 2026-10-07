@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.opensefer.core.domain.BookmarkRepository
+import app.opensefer.core.domain.DataError
 import app.opensefer.core.domain.LibraryRepository
 import app.opensefer.core.domain.ReadingLanguage
 import app.opensefer.core.domain.ReadingPreferences
@@ -58,16 +59,32 @@ data class ReaderUiState(
     val bookmarks: List<Bookmark> = emptyList(), // this book's, newest first
     val bookmarkedIds: Set<String> = emptySet(),
     val selection: List<SegmentRef> = emptyList(), // in reading order; non‑empty = selection mode
+    val selectionBookmarked: Boolean = false, // exactly one segment selected, and it has a bookmark
     val current: SegmentRef? = null, // the segment at the top of the screen…
     val currentBookmarkId: String? = null, // …and the id a bookmark on it would have
     val progress: Float = 0f,
     val sheet: ReaderSheet? = null,
-    val message: String? = null, // a one‑shot snackbar
+    val message: ReaderMessage? = null, // a one‑shot snackbar
 )
 
 data class ScrollRequest(val index: Int, val offset: Int, val id: Int)
 
 enum class ReaderSheet { Contents, Bookmarks, Display }
+
+/** A snackbar to show once — optionally with an [action] the reader can take from it. */
+data class ReaderMessage(val text: String, val action: MessageAction? = null, val id: Int)
+
+sealed interface MessageAction {
+    /** "Save to library" — offered when a book that isn't saved has been read for a while. */
+    data object SaveBook : MessageAction
+
+    /** Opens this book's bookmarks (after adding one). */
+    data object ShowBookmarks : MessageAction
+
+    /** Undo for a removed bookmark / a book removed from the library. */
+    data class RestoreBookmark(val bookmark: Bookmark) : MessageAction
+    data class RestoreBook(val book: LibraryBook) : MessageAction
+}
 
 @OptIn(FlowPreview::class)
 @Suppress("TooManyFunctions") // one small intent per reader action (UDF); splitting would only scatter them
@@ -80,6 +97,7 @@ class ReaderViewModel(
     private val heBookTitle: String,
     private val startTref: String? = null,
     private val startSegment: Int = 0,
+    private val startOffset: Int = 0,
     private val computation: CoroutineDispatcher = Dispatchers.Default, // injectable for tests
 ) : ViewModel() {
 
@@ -105,6 +123,13 @@ class ReaderViewModel(
     private var scrollRequestId = 0
     private val pendingPosition = MutableStateFlow<ReadingPosition?>(null)
     private var lastSaved: ReadingPosition? = null
+    private var firstSaved: ReadingPosition? = null
+    private var offeredSave = false
+    private var jumpJob: Job? = null
+    private var messageId = 0
+
+    /** Where the reader is right now (null until the saved place has been restored). */
+    val position: StateFlow<ReadingPosition?> = pendingPosition.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -118,7 +143,7 @@ class ReaderViewModel(
         viewModelScope.launch {
             bookmarkRepository.bookmarks.collect { all ->
                 val mine = all.filter { it.bookTitle == bookTitle }
-                _state.update { it.copy(bookmarks = mine, bookmarkedIds = mine.mapTo(HashSet()) { b -> b.id }) }
+                _state.update { it.copy(bookmarks = mine, bookmarkedIds = mine.mapTo(HashSet()) { b -> b.id }).withSelectionFlags() }
             }
         }
         viewModelScope.launch { pendingPosition.filterNotNull().debounce(SAVE_DEBOUNCE_MS).collect(::save) }
@@ -151,7 +176,7 @@ class ReaderViewModel(
         val startPassage = passageIndex[start.tref] ?: 0
         listOf(startPassage, startPassage - 1, startPassage + 1).mapNotNull { ensure(it) }.joinAll()
         val rows = rebuildNow()
-        val target = rows.rowIndexOf(leaves[startPassage].tref, start.segment, atPassageStart = start.offset == 0)
+        val target = rows.rowIndexOf(startPassage, start.segment, atPassageStart = start.offset == 0)
         _state.update {
             it.copy(
                 contents = contents,
@@ -164,7 +189,7 @@ class ReaderViewModel(
     private class Start(val tref: String, val segment: Int, val offset: Int)
 
     private fun resolveStart(): Start {
-        if (startTref != null && startTref in passageIndex) return Start(startTref, startSegment, 0)
+        if (startTref != null && startTref in passageIndex) return Start(startTref, startSegment, startOffset)
         val book = libraryRepository.books.value.firstOrNull { it.title == bookTitle }
         val resume = book?.lastTref?.takeIf { it in passageIndex }
         return if (book != null && resume != null) {
@@ -187,7 +212,7 @@ class ReaderViewModel(
     private fun ensure(p: Int, retry: Boolean = false): Job? {
         val inFlight = loads[p]?.takeIf { it.isActive }
         val skip = p !in leaves.indices || inFlight != null || when (passages[p]) {
-            is PassageState.Loaded -> true
+            is PassageState.Loaded, PassageState.Empty -> true
             is PassageState.Failed -> !retry
             PassageState.Loading, null -> false
         }
@@ -197,7 +222,7 @@ class ReaderViewModel(
             val result = textRepository.getText(leaves[p].tref)
             passages[p] = result.fold(
                 onSuccess = { PassageState.Loaded(it) },
-                onFailure = { PassageState.Failed(it.userMessage()) },
+                onFailure = { if (it is DataError.NotFound) PassageState.Empty else PassageState.Failed(it.userMessage()) },
             )
             scheduleRebuild()
         }.also { loads[p] = it }
@@ -234,7 +259,12 @@ class ReaderViewModel(
         if (!restored) return // don't save the top of the book before the saved place is restored
         val rows = _state.value.rows
         val row = rows.getOrNull(firstRow) ?: return
-        val top = row as? SegmentRow ?: rows.segmentAtOrBefore(firstRow) ?: return
+        val top = row as? SegmentRow ?: rows.segmentAt(firstRow)
+        if (top == null) {
+            // Text still loading at the top: there's no segment to bookmark "here" until it arrives.
+            _state.update { it.copy(current = null, currentBookmarkId = null) }
+            return
+        }
         val ref = SegmentRef(top.passage, top.segment.index)
         if (_state.value.current != ref) {
             _state.update {
@@ -276,6 +306,16 @@ class ReaderViewModel(
         if (position == lastSaved) return
         lastSaved = position
         libraryRepository.updatePosition(bookTitle, position)
+        offerToSave(position)
+    }
+
+    /** Once the reader has moved on in a book that isn't saved, suggest saving it (so this place is kept). */
+    private fun offerToSave(position: ReadingPosition) {
+        val first = firstSaved ?: position.also { firstSaved = it }
+        val moved = position.tref != first.tref || position.segment != first.segment
+        if (offeredSave || !moved || _state.value.saved) return
+        offeredSave = true
+        showMessage(UiStrings.NOT_SAVED_HINT, MessageAction.SaveBook)
     }
 
     override fun onCleared() {
@@ -285,12 +325,14 @@ class ReaderViewModel(
     /** Scrolls to [tref] (a contents entry or a bookmark), loading it first if needed. */
     fun jumpTo(tref: String, segment: Int = 0) {
         val p = passageIndex[tref] ?: return
-        _state.update { it.copy(sheet = null, selection = emptyList()) }
-        viewModelScope.launch {
+        _state.update { it.copy(sheet = null, selection = emptyList(), selectionBookmarked = false) }
+        // Only the latest jump counts: a slow earlier one must not yank the reader away later.
+        jumpJob?.cancel()
+        jumpJob = viewModelScope.launch {
             ensure(p - 1)
             ensure(p, retry = true)?.join()
             val rows = rebuildNow()
-            val index = rows.rowIndexOf(tref, segment)
+            val index = rows.rowIndexOf(p, segment)
             _state.update { it.copy(scrollRequest = ScrollRequest(index, 0, ++scrollRequestId)) }
         }
     }
@@ -300,17 +342,23 @@ class ReaderViewModel(
         rebuildNow()
     }
 
-    // Selection mode: tap verse numbers to pick segments, then copy (with the source) or bookmark.
+    // Selection mode: tap segments to pick them, then copy (with the source) or bookmark.
     fun toggleSelection(ref: SegmentRef) = _state.update { s ->
         val selection = if (ref in s.selection) {
             s.selection - ref
         } else {
             (s.selection + ref).sortedWith(compareBy(SegmentRef::passage, SegmentRef::segment))
         }
-        s.copy(selection = selection)
+        s.copy(selection = selection).withSelectionFlags()
     }
 
-    fun clearSelection() = _state.update { it.copy(selection = emptyList()) }
+    fun clearSelection() = _state.update { it.copy(selection = emptyList(), selectionBookmarked = false) }
+
+    private fun ReaderUiState.withSelectionFlags(): ReaderUiState {
+        val only = selection.singleOrNull()
+        val id = only?.let { ref -> leaves.getOrNull(ref.passage)?.let { bookmarkId(it.tref, ref.segment) } }
+        return copy(selectionBookmarked = id != null && id in bookmarkedIds)
+    }
 
     /** The selected segments as clipboard text (with a source line); clears the selection. */
     fun copySelection(): String? {
@@ -321,30 +369,36 @@ class ReaderViewModel(
             CopyPart(leaves[p], chapter, chapter.segments.filter { it.index in wanted })
         }.filter { it.segments.isNotEmpty() }
         if (parts.isEmpty()) return null
-        _state.update { it.copy(selection = emptyList(), message = UiStrings.COPIED) }
+        clearSelection()
+        showMessage(UiStrings.COPIED)
         return buildCopyText(heBookTitle, parts, s.preferences.language, s.preferences.showNikud)
     }
 
+    /**
+     * The selection bar's bookmark: removes the bookmark when the one selected segment has one;
+     * otherwise bookmarks where the selection starts. (Never removes as a side effect of adding.)
+     */
     fun bookmarkSelection() {
-        val first = _state.value.selection.firstOrNull() ?: return
+        val s = _state.value
+        val first = s.selection.firstOrNull() ?: return
+        val bookmarked = s.selectionBookmarked
         clearSelection()
-        toggleBookmark(first)
+        if (bookmarked) removeBookmarkAt(first) else addBookmark(first)
     }
 
     /** Bookmarks the segment at the top of the screen (or removes its bookmark). */
     fun toggleBookmarkHere() {
-        _state.value.current?.let(::toggleBookmark)
+        val ref = _state.value.current ?: return
+        val id = leaves.getOrNull(ref.passage)?.let { bookmarkId(it.tref, ref.segment) } ?: return
+        if (id in _state.value.bookmarkedIds) removeBookmarkAt(ref) else addBookmark(ref)
     }
 
-    fun toggleBookmark(ref: SegmentRef) {
+    private fun addBookmark(ref: SegmentRef) {
         val leaf = leaves.getOrNull(ref.passage) ?: return
         val chapter = (passages[ref.passage] as? PassageState.Loaded)?.chapter ?: return
         val segment = chapter.segments.firstOrNull { it.index == ref.segment } ?: return
-        val id = bookmarkId(leaf.tref, segment.index)
-        if (id in _state.value.bookmarkedIds) {
-            bookmarkRepository.remove(id)
-            _state.update { it.copy(message = UiStrings.BOOKMARK_REMOVED) }
-        } else {
+        // Already marked (a selection that starts on a bookmark): the place is bookmarked either way.
+        if (bookmarkId(leaf.tref, segment.index) !in _state.value.bookmarkedIds) {
             bookmarkRepository.add(
                 Bookmark(
                     bookTitle = bookTitle,
@@ -355,17 +409,28 @@ class ReaderViewModel(
                     snippet = segment.snippet(),
                 ),
             )
-            _state.update { it.copy(message = UiStrings.BOOKMARK_ADDED) }
         }
+        showMessage(UiStrings.BOOKMARK_ADDED, MessageAction.ShowBookmarks)
+    }
+
+    private fun removeBookmarkAt(ref: SegmentRef) {
+        val id = leaves.getOrNull(ref.passage)?.let { bookmarkId(it.tref, ref.segment) } ?: return
+        val bookmark = _state.value.bookmarks.firstOrNull { it.id == id } ?: return
+        bookmarkRepository.remove(id)
+        showMessage(UiStrings.BOOKMARK_REMOVED, MessageAction.RestoreBookmark(bookmark))
     }
 
     fun removeBookmark(id: String) = bookmarkRepository.remove(id)
 
-    /** Saves the book to the library (remembering the current place), or removes it. */
+    fun restoreBookmark(bookmark: Bookmark) = bookmarkRepository.add(bookmark)
+
+    /** Saves the book to the library (remembering the current place), or removes it (with an undo). */
     fun toggleSaved() {
+        offeredSave = true // they've decided about saving: no suggestion from now on
         if (_state.value.saved) {
+            val book = libraryRepository.books.value.firstOrNull { it.title == bookTitle } ?: return
             libraryRepository.remove(bookTitle)
-            _state.update { it.copy(message = UiStrings.REMOVED_FROM_LIBRARY) }
+            showMessage(UiStrings.REMOVED_FROM_LIBRARY, MessageAction.RestoreBook(book))
         } else {
             val details = _state.value.contents?.details
             libraryRepository.add(
@@ -379,17 +444,37 @@ class ReaderViewModel(
             )
             lastSaved = null
             flushPosition() // so "continue reading" picks up right here
-            _state.update { it.copy(message = UiStrings.SAVED_TO_LIBRARY) }
+            showMessage(UiStrings.SAVED_TO_LIBRARY)
         }
     }
 
-    fun consumeMessage() = _state.update { it.copy(message = null) }
+    /** The reader took the action offered on a snackbar. */
+    fun onMessageAction(action: MessageAction) {
+        when (action) {
+            MessageAction.SaveBook -> if (!_state.value.saved) toggleSaved()
+            MessageAction.ShowBookmarks -> openSheet(ReaderSheet.Bookmarks)
+            is MessageAction.RestoreBookmark -> bookmarkRepository.add(action.bookmark)
+            is MessageAction.RestoreBook -> {
+                offeredSave = true
+                libraryRepository.add(action.book)
+                lastSaved = null
+                flushPosition() // and where they are now, not where they were when they removed it
+            }
+        }
+    }
+
+    private fun showMessage(text: String, action: MessageAction? = null) {
+        _state.update { it.copy(message = ReaderMessage(text, action, ++messageId)) }
+    }
+
+    /** The snackbar for message [id] is done (shown, or abandoned): it won't be shown again. */
+    fun consumeMessage(id: Int) = _state.update { if (it.message?.id == id) it.copy(message = null) else it }
 
     // Reading preferences
     fun setFontScale(scale: Float) = preferencesRepository.setFontScale(scale)
     fun setTheme(theme: ReadingTheme) = preferencesRepository.setTheme(theme)
     fun setLanguage(language: ReadingLanguage) = preferencesRepository.setLanguage(language)
-    fun toggleNikud() = preferencesRepository.setShowNikud(!_state.value.preferences.showNikud)
+    fun toggleNikud() = preferencesRepository.toggleShowNikud()
 
     // Sheets (reader UI state, not navigation)
     fun openSheet(sheet: ReaderSheet) = _state.update { it.copy(sheet = sheet) }

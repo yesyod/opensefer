@@ -14,16 +14,21 @@ All notable changes to OpenSefer are documented here. The format is based on
   recent bookmarks. Long‑press a cover for contents, offline download or removal (with undo).
 - **Offline‑first text storage** — every index and passage fetched is stored on the device and served
   from there first (memory → disk → network), with stale‑copy fallback when offline, in‑flight request
-  de‑duplication, and background download of saved books (ADR 0004).
-- **Copy a passage** — word selection by long‑press, and a verse‑selection mode (tap verse numbers)
-  that copies whole segments with their source, e.g. `(בראשית א׳:א-ג)`.
-- **Bookmarks** at specific segments — from a verse, or "here" in the top bar; listed in the reader's
-  contents sheet and on the home screen.
+  de‑duplication, and background download of saved books (ADR 0004). Sections Sefaria has no text for
+  (a daf without Gemara, an uncommented chapter) are remembered as empty: they take no room in the
+  reader, aren't asked for again, and don't stop a book from finishing its download.
+- **Copy a passage** — tap a verse (or several) to select it and copy whole segments with their source,
+  e.g. `(בראשית א׳:א׳-ג׳)`; long‑press still selects single words.
+- **Bookmarks** at specific segments — from a selected verse, or "here" in the top bar; listed in the
+  reader's contents sheet and on the home screen. Removing a bookmark (or a book) can be undone.
 - **One‑tap save** to the library from search results, the book page and the reader.
 - **Book page** (replaces the flat TOC): cover, details, read/continue, save, offline status, and a
   chapter grid or drill‑down tree.
 - Talmud tractates addressed by daf and amud; chaptered sections of complex books expand into chapters.
-- An "on‑device texts" section in About, with the space used and a way to free it.
+- An "on‑device texts" section in About, with the space used and a **free up space** action (after a
+  confirmation) that deletes what was merely read and keeps the saved books whole.
+- An **automatic** theme that follows the device's light / dark setting — now the default.
+- A gentle "save this book?" (once, after reading on) in a book that isn't in the library.
 
 ### Changed
 
@@ -31,8 +36,13 @@ All notable changes to OpenSefer are documented here. The format is based on
   ahead/behind the screen, keeps the reader's place while text loads above it, and resumes on the
   exact segment and scroll offset. Position writes are debounced and flushed when the app stops.
 - The whole interface is Hebrew and right‑to‑left; English reading text is laid out left‑to‑right.
-- The app draws edge‑to‑edge with the system bars visible (one swipe for Back again); the reader's top
-  bar slides away while reading.
+  Buttons use gender‑neutral action nouns (שמירה, העתקה, הסרה…).
+- Hebrew is the default reading language (bilingual and English are one tap away).
+- Hebrew numerals in running text carry geresh / gershayim (פרק ל״א, דף ב׳ ע״א), so a chapter number
+  can't read as a word; the margins and the chapter grid keep bare letters.
+- The app draws edge‑to‑edge with the system bars visible (one swipe for Back again); on Android the
+  reader's top bar slides away while reading (on iOS, where it holds the only way back, it stays put).
+  The bars follow the reading theme, also on Android 7–9.
 - Text requests use `version=source`, so Aramaic originals (Talmud, Targum) load.
 - Search keeps to texts (`type=ref`), autofocuses, offers well‑known books, and works above the keyboard.
 - Errors are shown as friendly Hebrew messages (offline / not found / generic).
@@ -47,7 +57,12 @@ All notable changes to OpenSefer are documented here. The format is based on
 - No startup flash of the light theme or the default books before saved data loads.
 - Cancelled searches no longer surface a "cancelled" error; a cancelled load is never treated as a failure.
 - Sefaria errors returned as HTTP 200 are recognised (and never cached); default (untitled) schema nodes
-  no longer produce invalid refs; commentary segments align by position; numeric HTML entities decode.
+  no longer produce invalid refs; commentary segments align by position; character references —
+  numeric ones included — decode in a single pass (`&#38;lt;` stays `&lt;`).
+- Hiding nikud no longer deletes the maqaf, paseq and sof pasuq ("עַל־פְּנֵי" became "עלפני") — in the
+  reader, in copied text and in bookmark previews.
+- A corrupt or unreadable settings or library file no longer leaves the app on a blank screen: the
+  file is replaced, reads are retried, and the defaults are used if all else fails.
 - Material's default purple no longer leaks into switches, fields and sheets.
 
 ### Removed

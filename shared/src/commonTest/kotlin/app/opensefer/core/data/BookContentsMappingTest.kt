@@ -64,7 +64,8 @@ class BookContentsMappingTest {
         assertEquals(10, c.leaves.size)
         val first = c.leaves.first()
         assertEquals("Mishneh_Torah,_Repentance.1", first.tref)
-        assertEquals("פרק א", first.heTitle)
+        assertEquals("פרק א׳", first.heTitle) // running text: with a geresh…
+        assertEquals("א", first.shortLabel) // …the chapter grid: the bare letter
     }
 
     @Test

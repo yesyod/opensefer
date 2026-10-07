@@ -61,6 +61,13 @@ class BookDownloaderTest {
             _books.update { list -> list.map { if (it.title == title) it.copy(offline = offline) else it } }
     }
 
+    /** On‑device storage that has every book in [stored]. */
+    private class FakeStorage(private val stored: Set<String>? = null) : OfflineStorage {
+        override suspend fun isStored(bookTitle: String) = stored?.contains(bookTitle) ?: true
+        override suspend fun sizeBytes() = 0L
+        override suspend fun clearExcept(keepBooks: Set<String>) = Unit
+    }
+
     /**
      * Runs [body] with an app scope whose work is *foreground* test work — `advanceUntilIdle` skips
      * `backgroundScope` tasks — and cancels it afterwards (the auto‑download collector never ends).
@@ -78,7 +85,7 @@ class BookDownloaderTest {
     fun download_cachesEveryPassage_andMarksTheBookOffline() = runWithAppScope { appScope ->
         val text = FakeText(mapOf("Genesis" to book("Genesis", 5)))
         val library = FakeLibrary(listOf(LibraryBook("Genesis", "בראשית")))
-        val downloader = BookDownloader(text, library, appScope)
+        val downloader = BookDownloader(text, library, appScope, FakeStorage())
 
         downloader.download("Genesis")
         advanceUntilIdle()
@@ -94,7 +101,7 @@ class BookDownloaderTest {
             if (tref == "Genesis.4") DataError.Offline() else null
         }
         val library = FakeLibrary(listOf(LibraryBook("Genesis", "בראשית")))
-        val downloader = BookDownloader(text, library, appScope)
+        val downloader = BookDownloader(text, library, appScope, FakeStorage())
 
         downloader.download("Genesis")
         advanceUntilIdle()
@@ -108,7 +115,7 @@ class BookDownloaderTest {
         val huge = BookDownloader.AUTO_DOWNLOAD_MAX_PASSAGES + 1
         val text = FakeText(mapOf("Genesis" to book("Genesis", 3), "Shulchan Arukh" to book("Shulchan Arukh", huge)))
         val library = FakeLibrary(listOf(LibraryBook("Genesis", "בראשית"), LibraryBook("Shulchan Arukh", "שולחן ערוך")))
-        val downloader = BookDownloader(text, library, appScope)
+        val downloader = BookDownloader(text, library, appScope, FakeStorage())
 
         downloader.startAutoDownloads(startDelayMillis = 0)
         advanceUntilIdle()
@@ -119,10 +126,52 @@ class BookDownloaderTest {
     }
 
     @Test
+    fun sefariaErrors_easeOff_andGiveUpAfterAFewRounds_withoutMarkingTheBookOffline() = runWithAppScope { appScope ->
+        var attempts = 0
+        val text = FakeText(mapOf("Genesis" to book("Genesis", 50))) { attempts++; DataError.Server() }
+        val library = FakeLibrary(listOf(LibraryBook("Genesis", "בראשית")))
+        val downloader = BookDownloader(text, library, appScope, FakeStorage())
+
+        downloader.download("Genesis")
+        advanceUntilIdle()
+
+        assertTrue(attempts <= 9, "made $attempts requests") // three rounds of three, then it stopped
+        assertFalse(library.books.value.single().offline)
+    }
+
+    @Test
+    fun aDiskThatIsFull_stopsTheDownloadAtOnce() = runWithAppScope { appScope ->
+        var attempts = 0
+        val text = FakeText(mapOf("Genesis" to book("Genesis", 50))) { attempts++; DataError.Storage() }
+        val library = FakeLibrary(listOf(LibraryBook("Genesis", "בראשית")))
+        val downloader = BookDownloader(text, library, appScope, FakeStorage())
+
+        downloader.download("Genesis")
+        advanceUntilIdle()
+
+        assertEquals(3, attempts) // the first round only
+        assertFalse(library.books.value.single().offline)
+    }
+
+    @Test
+    fun aBookMarkedOffline_withNothingOnTheDevice_downloadsAgain() = runWithAppScope { appScope ->
+        // E.g. after a backup restore: the library came back, its texts (never backed up) didn't.
+        val text = FakeText(mapOf("Genesis" to book("Genesis", 3)))
+        val library = FakeLibrary(listOf(LibraryBook("Genesis", "בראשית", offline = true)))
+        val downloader = BookDownloader(text, library, appScope, FakeStorage(stored = emptySet()))
+
+        downloader.startAutoDownloads(startDelayMillis = 0)
+        advanceUntilIdle()
+
+        assertEquals((1..3).map { "Genesis.$it" }.toSet(), text.cached.toSet())
+        assertTrue(library.books.value.single().offline)
+    }
+
+    @Test
     fun aBookSavedLater_isAutoDownloadedToo() = runWithAppScope { appScope ->
         val text = FakeText(mapOf("Genesis" to book("Genesis", 2), "Exodus" to book("Exodus", 2)))
         val library = FakeLibrary(listOf(LibraryBook("Genesis", "בראשית")))
-        val downloader = BookDownloader(text, library, appScope)
+        val downloader = BookDownloader(text, library, appScope, FakeStorage())
         downloader.startAutoDownloads(startDelayMillis = 0)
         advanceUntilIdle()
 

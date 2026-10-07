@@ -28,6 +28,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.opensefer.core.domain.ReadingLanguage
 import app.opensefer.core.domain.ReadingPreferences
@@ -76,6 +77,7 @@ fun DisplayOptionsSheet(
             SheetLabel(UiStrings.THEME)
             SegmentedRow(
                 options = listOf(
+                    UiStrings.THEME_SYSTEM to ReadingTheme.System,
                     UiStrings.THEME_LIGHT to ReadingTheme.Light,
                     UiStrings.THEME_SEPIA to ReadingTheme.Sepia,
                     UiStrings.THEME_DARK to ReadingTheme.Dark,
@@ -139,7 +141,7 @@ private fun <T> SegmentedRow(
                     .selectable(selected = isSelected, role = Role.RadioButton, onClick = { onSelect(value) }),
             ) {
                 Box(
-                    Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(vertical = 10.dp),
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -147,6 +149,8 @@ private fun <T> SegmentedRow(
                         color = if (isSelected) colors.onAccent else colors.text,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                         style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }

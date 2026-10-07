@@ -14,4 +14,7 @@ sealed class DataError(message: String, cause: Throwable?) : Exception(message, 
 
     /** Sefaria answered with an error or with data we couldn't read. */
     class Server(cause: Throwable? = null) : DataError("Server error", cause)
+
+    /** The device couldn't store the text (storage full or unavailable). */
+    class Storage(cause: Throwable? = null) : DataError("Couldn't store on the device", cause)
 }

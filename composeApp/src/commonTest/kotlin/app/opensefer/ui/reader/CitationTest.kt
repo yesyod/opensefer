@@ -42,21 +42,21 @@ class CitationTest {
 
     @Test
     fun aConsecutiveRange_isCitedAsARange() {
-        assertEquals("בראשית א׳:א-ב", citation("בראשית", part(0, 1), english = false))
+        assertEquals("בראשית א׳:א׳-ב׳", citation("בראשית", part(0, 1), english = false))
         assertEquals("Genesis 1:1-2", citation("בראשית", part(0, 1), english = true))
     }
 
     @Test
     fun scatteredSegments_areListed_andASingleOneIsJustItsNumber() {
-        assertEquals("בראשית א׳:א, ג", citation("בראשית", part(0, 2), english = false))
-        assertEquals("בראשית א׳:ב", citation("בראשית", part(1), english = false))
+        assertEquals("בראשית א׳:א׳, ג׳", citation("בראשית", part(0, 2), english = false))
+        assertEquals("בראשית א׳:ב׳", citation("בראשית", part(1), english = false))
     }
 
     @Test
     fun hebrewCopy_honoursTheNikudSetting_andEndsWithTheSource() {
         val text = buildCopyText("בראשית", listOf(part(0)), ReadingLanguage.Hebrew, showNikud = false)
 
-        assertEquals("בראשית ברא\n(בראשית א׳:א)", text)
+        assertEquals("בראשית ברא\n(בראשית א׳:א׳)", text)
     }
 
     @Test
@@ -64,7 +64,7 @@ class CitationTest {
         val text = buildCopyText("בראשית", listOf(part(0, 1)), ReadingLanguage.Bilingual, showNikud = true)
 
         assertEquals(
-            "בְּרֵאשִׁית בָּרָא\nIn the beginning\n\nוְהָאָרֶץ\nAnd the earth\n(בראשית א׳:א-ב)",
+            "בְּרֵאשִׁית בָּרָא\nIn the beginning\n\nוְהָאָרֶץ\nAnd the earth\n(בראשית א׳:א׳-ב׳)",
             text,
         )
     }
@@ -77,8 +77,8 @@ class CitationTest {
 
     @Test
     fun placeLabels_nameTheSegmentWhenTheBookSaysWhatItIs() {
-        assertEquals("פרק א, פסוק ב", placeLabel(leaf, chapter.segments[1], segmentName = "פסוק"))
-        assertEquals("פרק א, ב", placeLabel(leaf, chapter.segments[1], segmentName = null))
+        assertEquals("פרק א, פסוק ב׳", placeLabel(leaf, chapter.segments[1], segmentName = "פסוק"))
+        assertEquals("פרק א, ב׳", placeLabel(leaf, chapter.segments[1], segmentName = null))
         assertEquals("פרק א", placeLabel(leaf, segment(0, "x", rubric = true), segmentName = "פסוק"))
     }
 

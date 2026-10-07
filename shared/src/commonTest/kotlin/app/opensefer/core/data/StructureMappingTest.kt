@@ -28,8 +28,8 @@ class StructureMappingTest {
         assertEquals("Berakhot.2b", c.leaves[1].tref)
         assertEquals("Berakhot.64a", c.leaves.last().tref)
         assertEquals(125, c.leaves.size)
-        assertEquals("דף ב ע״א", c.leaves.first().heTitle)
-        assertEquals("דף ב ע״ב", c.leaves[1].heTitle)
+        assertEquals("דף ב׳ ע״א", c.leaves.first().heTitle)
+        assertEquals("דף ב׳ ע״ב", c.leaves[1].heTitle)
     }
 
     @Test
@@ -63,7 +63,7 @@ class StructureMappingTest {
         val part = c.root.children.single() as TocBranch
         assertEquals(53, part.children.size)
         assertEquals("Tanya,_Part_I;_Likkutei_Amarim.1", c.leaves.first().tref)
-        assertEquals("חלק ראשון; לקוטי אמרים › פרק א", c.leaves.first().crumb)
+        assertEquals("חלק ראשון; לקוטי אמרים › פרק א׳", c.leaves.first().crumb)
     }
 
     @Test
@@ -115,5 +115,7 @@ class StructureMappingTest {
     fun numericEntities_areDecoded() {
         assertEquals("א' — \"x\"", SefariaHtmlParser.parse("&#1488;&#39; &#x2014; &quot;x&quot;").plainText)
         assertEquals("&#39;", SefariaHtmlParser.parse("&amp;#39;").plainText) // double‑escaped stays literal
+        assertEquals("&lt;b&gt;", SefariaHtmlParser.parse("&#38;lt;b&amp;gt;").plainText) // one pass, never two
+        assertEquals("a — b… &bogus;", SefariaHtmlParser.parse("a &mdash; b&hellip; &bogus;").plainText)
     }
 }

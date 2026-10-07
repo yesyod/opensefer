@@ -46,4 +46,14 @@ class HebrewNumeralsTest {
         assertEquals("0", HebrewNumerals.toHebrew(0))
         assertEquals("-3", HebrewNumerals.toHebrew(-3))
     }
+
+    @Test
+    fun punctuate_addsGereshOrGershayim_soANumeralCantReadAsAWord() {
+        assertEquals("א׳", HebrewNumerals.punctuate("א"))
+        assertEquals("ל״א", HebrewNumerals.punctuate("לא")) // 31, not "no"
+        assertEquals("קכ״ו", HebrewNumerals.punctuate("קכו"))
+        assertEquals("א׳:ב׳", HebrewNumerals.punctuate("א:ב")) // each level of a label on its own
+        assertEquals("12", HebrewNumerals.punctuate("12")) // not a Hebrew numeral: left alone
+        assertEquals("", HebrewNumerals.punctuate(""))
+    }
 }

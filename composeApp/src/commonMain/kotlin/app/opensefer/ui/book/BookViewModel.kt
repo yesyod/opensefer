@@ -59,14 +59,17 @@ class BookViewModel(
         }
     }
 
-    /** Saves the book (its whole text then downloads in the background) — or removes it. */
-    fun toggleSaved() {
+    /**
+     * Saves the book (its whole text then downloads in the background) — or removes it, returning the
+     * removed entry so it can be [restore]d as it was.
+     */
+    fun toggleSaved(): LibraryBook? {
         val s = _state.value
         if (s.saved != null) {
             library.remove(s.title)
-            return
+            return s.saved
         }
-        val details = s.contents?.details ?: return // only a book that loaded can be saved
+        val details = s.contents?.details ?: return null // only a book that loaded can be saved
         library.add(
             LibraryBook(
                 title = s.title,
@@ -76,7 +79,11 @@ class BookViewModel(
                 heAuthor = details.heAuthor,
             ),
         )
+        return null
     }
+
+    /** Undoes a removal: the book returns with its reading place and spot on the shelf. */
+    fun restore(book: LibraryBook) = library.add(book)
 
     fun download() = downloader.download(_state.value.title)
 }
