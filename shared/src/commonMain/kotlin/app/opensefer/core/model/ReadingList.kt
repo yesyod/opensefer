@@ -32,7 +32,9 @@ fun BookContents.toReadingItems(): List<ReadingItem> {
     fun walk(node: TocNode, depth: Int) {
         when (node) {
             is TocBranch -> {
-                if (depth > 0) out.add(ReadingHeading(depth, node.heTitle, key = "h:$depth:${node.title}:${out.size}"))
+                if (depth > 0 && node.heTitle.isNotBlank()) {
+                    out.add(ReadingHeading(depth, node.heTitle, key = "h:$depth:${node.title}:${out.size}"))
+                }
                 node.children.forEach { walk(it, depth + 1) }
             }
             is TocLeaf -> out.add(ReadingPassage(node))

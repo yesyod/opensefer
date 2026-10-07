@@ -13,11 +13,11 @@ import app.opensefer.core.domain.ReadingPreferences
 import app.opensefer.core.domain.ReadingPreferencesRepository
 import app.opensefer.core.domain.ReadingTheme
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import okio.IOException
 
@@ -38,27 +38,46 @@ class DataStoreReadingPreferencesRepository(
         val showNikud = booleanPreferencesKey("showNikud")
     }
 
-    override val preferences: StateFlow<ReadingPreferences> =
-        dataStore.data
-            .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
-            .map { prefs ->
-                val defaults = ReadingPreferences()
-                ReadingPreferences(
-                    fontScale = (prefs[Keys.fontScale] ?: defaults.fontScale).coerceIn(0.8f, 2.0f),
-                    theme = prefs[Keys.theme].toEnum(defaults.theme),
-                    language = prefs[Keys.language].toEnum(defaults.language),
-                    showNikud = prefs[Keys.showNikud] ?: defaults.showNikud,
-                )
-            }
-            .stateIn(scope, SharingStarted.Eagerly, ReadingPreferences())
+    private val _preferences = MutableStateFlow(ReadingPreferences())
+    override val preferences: StateFlow<ReadingPreferences> = _preferences.asStateFlow()
 
-    override fun setFontScale(scale: Float) = edit { it[Keys.fontScale] = scale.coerceIn(0.8f, 2.0f) }
+    private val _loaded = MutableStateFlow(false)
+    override val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
+
+    init {
+        scope.launch {
+            dataStore.data
+                .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+                .collect { prefs ->
+                    _preferences.value = prefs.toReadingPreferences()
+                    _loaded.value = true // after the value, so the first frame already has the real theme
+                }
+        }
+    }
+
+    override fun setFontScale(scale: Float) = edit { it[Keys.fontScale] = scale.coerceIn(MIN_SCALE, MAX_SCALE) }
     override fun setTheme(theme: ReadingTheme) = edit { it[Keys.theme] = theme.name }
     override fun setLanguage(language: ReadingLanguage) = edit { it[Keys.language] = language.name }
     override fun setShowNikud(show: Boolean) = edit { it[Keys.showNikud] = show }
 
+    private fun Preferences.toReadingPreferences(): ReadingPreferences {
+        val defaults = ReadingPreferences()
+        return ReadingPreferences(
+            fontScale = (this[Keys.fontScale] ?: defaults.fontScale).coerceIn(MIN_SCALE, MAX_SCALE),
+            theme = this[Keys.theme].toEnum(defaults.theme),
+            language = this[Keys.language].toEnum(defaults.language),
+            showNikud = this[Keys.showNikud] ?: defaults.showNikud,
+        )
+    }
+
     private fun edit(block: (MutablePreferences) -> Unit) {
-        scope.launch { dataStore.edit(block) }
+        // UNDISPATCHED keeps rapid successive writes (a slider drag) in call order.
+        scope.launch(start = CoroutineStart.UNDISPATCHED) { dataStore.edit(block) }
+    }
+
+    private companion object {
+        const val MIN_SCALE = 0.8f
+        const val MAX_SCALE = 2.0f
     }
 }
 

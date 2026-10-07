@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   verify:
-    name: Verify (detekt + shared tests)
+    name: Verify (detekt + unit tests)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,8 +27,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Static analysis
         run: ./gradlew detekt --stacktrace
-      - name: Shared logic tests
-        run: ./gradlew :shared:testDebugUnitTest --stacktrace
+      - name: Unit tests (shared logic + ViewModels)
+        run: ./gradlew :shared:testDebugUnitTest :composeApp:testDebugUnitTest --stacktrace
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4

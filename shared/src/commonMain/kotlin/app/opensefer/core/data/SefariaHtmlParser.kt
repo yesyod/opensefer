@@ -144,10 +144,13 @@ object SefariaHtmlParser {
         }
     }
 
+    private val NumericEntity = Regex("&#([xX][0-9a-fA-F]{1,6}|[0-9]{1,7});")
+
     private fun decodeEntities(s: String): String {
         if ('&' !in s) return s
         // Resolve &amp; LAST so a double-escaped "&amp;lt;" stays "&lt;" instead of becoming "<".
         return s
+            .replace(NumericEntity) { match -> decodeCodePoint(match.groupValues[1]) ?: match.value }
             .replace("&nbsp;", " ")
             .replace("&thinsp;", " ")
             .replace("&lt;", "<")
@@ -157,4 +160,24 @@ object SefariaHtmlParser {
             .replace("&apos;", "'")
             .replace("&amp;", "&")
     }
+
+    /** `&#1488;` / `&#x5D0;` → "א"; null for an invalid code point (the entity is then kept verbatim). */
+    private fun decodeCodePoint(digits: String): String? {
+        val code = if (digits[0] == 'x' || digits[0] == 'X') digits.drop(1).toIntOrNull(16) else digits.toIntOrNull()
+        return when {
+            code == null || code <= 0 || code > MAX_CODE_POINT || code in SURROGATES -> null
+            code < SUPPLEMENTARY_START -> Char(code).toString()
+            else -> {
+                val offset = code - SUPPLEMENTARY_START
+                charArrayOf(Char(HIGH_SURROGATE + (offset shr 10)), Char(LOW_SURROGATE + (offset and 0x3FF)))
+                    .concatToString()
+            }
+        }
+    }
+
+    private const val MAX_CODE_POINT = 0x10FFFF
+    private const val SUPPLEMENTARY_START = 0x10000
+    private const val HIGH_SURROGATE = 0xD800
+    private const val LOW_SURROGATE = 0xDC00
+    private val SURROGATES = 0xD800..0xDFFF
 }

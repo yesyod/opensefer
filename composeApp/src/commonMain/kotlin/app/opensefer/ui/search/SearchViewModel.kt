@@ -7,7 +7,7 @@ import app.opensefer.core.domain.LibraryRepository
 import app.opensefer.core.domain.SearchRepository
 import app.opensefer.core.model.BookSearchResult
 import app.opensefer.core.model.LibraryBook
-import app.opensefer.ui.UiStrings
+import app.opensefer.ui.userMessage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,7 +21,9 @@ data class SearchUiState(
     val query: String = "",
     val loading: Boolean = false,
     val results: List<BookSearchResult> = emptyList(),
+    val searched: Boolean = false, // a search for [query] has completed (so "no results" can show)
     val error: String? = null,
+    val savedTitles: Set<String> = emptySet(),
 )
 
 class SearchViewModel(
@@ -34,8 +36,17 @@ class SearchViewModel(
 
     private var searchJob: Job? = null
 
+    init {
+        viewModelScope.launch {
+            libraryRepository.books.collect { books ->
+                _state.update { it.copy(savedTitles = books.mapTo(HashSet()) { book -> book.title }) }
+            }
+        }
+    }
+
     fun onQueryChange(query: String) {
-        _state.update { it.copy(query = query) }
+        if (query == _state.value.query) return
+        _state.update { it.copy(query = query, searched = false) }
         searchJob?.cancel()
         if (query.isBlank()) {
             _state.update { it.copy(results = emptyList(), loading = false, error = null) }
@@ -43,16 +54,23 @@ class SearchViewModel(
         }
         searchJob = viewModelScope.launch {
             delay(DEBOUNCE_MS) // debounce keystrokes before hitting the API
-            _state.update { it.copy(loading = true) }
+            _state.update { it.copy(loading = true, error = null) }
             searchRepository.search(query).fold(
-                onSuccess = { results -> _state.update { it.copy(results = results, loading = false, error = null) } },
-                onFailure = { e -> _state.update { it.copy(loading = false, error = e.message ?: UiStrings.ERROR_SEARCH) } },
+                onSuccess = { results ->
+                    _state.update { it.copy(results = results, loading = false, error = null, searched = true) }
+                },
+                onFailure = { e -> _state.update { it.copy(loading = false, error = e.userMessage(), searched = true) } },
             )
         }
     }
 
-    fun addToLibrary(result: BookSearchResult) {
-        libraryRepository.add(LibraryBook(result.title, result.heTitle))
+    /** One‑tap save from the results; tapping again removes it. */
+    fun toggleSaved(result: BookSearchResult) {
+        if (result.title in _state.value.savedTitles) {
+            libraryRepository.remove(result.title)
+        } else {
+            libraryRepository.add(LibraryBook(result.title, result.heTitle))
+        }
     }
 
     private companion object {

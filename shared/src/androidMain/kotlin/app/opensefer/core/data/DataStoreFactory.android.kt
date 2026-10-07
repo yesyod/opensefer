@@ -8,6 +8,9 @@ internal lateinit var appContext: Context
 
 internal actual fun dataStoreDir(): String = appContext.filesDir.absolutePath
 
+/** Saved texts persist (the OS never clears this dir) but are excluded from Auto Backup — they're re‑downloadable. */
+internal actual fun diskCacheDir(): String = appContext.noBackupFilesDir.absolutePath
+
 /**
  * Captures the application [Context] via Jetpack App Startup, so the persistence layer needs no
  * `Application` subclass and the app keeps Koin Context‑free. Registered in this module's manifest

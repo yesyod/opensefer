@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import app.opensefer.core.model.LibraryBook
+import app.opensefer.core.model.ReadingPosition
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -36,18 +37,22 @@ class DataStoreLibraryRepositoryTest {
         PreferenceDataStoreFactory.createWithPath(scope = scope, produceFile = { path })
 
     @Test
-    fun firstRun_showsSeededDefaults() = runTest {
+    fun firstRun_showsSeededDefaults_onceLoaded() = runTest {
         val repo = DataStoreLibraryRepository(storeOn(backgroundScope), backgroundScope)
-        assertEquals(DataStoreLibraryRepository.DEFAULT_BOOKS, repo.books.first())
+        repo.loaded.first { it }
+        assertEquals(DataStoreLibraryRepository.DEFAULT_BOOKS, repo.books.value)
     }
 
     @Test
     fun addRemovePosition_persistAcrossAFreshInstance() = runTest {
         val scopeA = CoroutineScope(coroutineContext + Job())
-        val repoA = DataStoreLibraryRepository(storeOn(scopeA), scopeA)
+        val repoA = DataStoreLibraryRepository(storeOn(scopeA), scopeA, clock = { 42L })
         repoA.add(LibraryBook("Pirkei Avot", "פרקי אבות"))
         repoA.remove("Mishneh Torah, Repentance")
-        repoA.updatePosition("Mishneh Torah, Foundations of the Torah", "Genesis.5", "פרק ה")
+        repoA.updatePosition(
+            "Mishneh Torah, Foundations of the Torah",
+            ReadingPosition(tref = "Genesis.5", segment = 3, label = "פרק ה, ד", progress = 0.5f),
+        )
         advanceUntilIdle()
         val afterA = repoA.books.first { list -> list.any { it.title == "Pirkei Avot" } }
         scopeA.cancel() // release the file
@@ -59,6 +64,34 @@ class DataStoreLibraryRepositoryTest {
 
         assertEquals(afterA.map { it.title }.toSet(), reloaded.map { it.title }.toSet())
         assertTrue(reloaded.none { it.title == "Mishneh Torah, Repentance" })
-        assertEquals("Genesis.5", reloaded.first { it.title == "Mishneh Torah, Foundations of the Torah" }.lastTref)
+        val resumed = reloaded.first { it.title == "Mishneh Torah, Foundations of the Torah" }
+        assertEquals("Genesis.5", resumed.lastTref)
+        assertEquals(3, resumed.lastSegment) // exact resume: down to the segment
+        assertEquals(0.5f, resumed.progress)
+        assertEquals(42L, resumed.lastReadAt)
+        assertEquals(42L, reloaded.first { it.title == "Pirkei Avot" }.addedAt)
+    }
+
+    @Test
+    fun detailsAndOfflineFlag_areStoredOnTheBook() = runTest {
+        val repo = DataStoreLibraryRepository(storeOn(backgroundScope), backgroundScope)
+        repo.add(LibraryBook("Berakhot", "ברכות"))
+        repo.updateDetails("Berakhot", category = "Talmud", heCategory = "תלמוד", heAuthor = null)
+        repo.setOffline("Berakhot", true)
+
+        val book = repo.books.first { list -> list.any { it.title == "Berakhot" && it.offline } }
+            .first { it.title == "Berakhot" }
+        assertEquals("Talmud", book.category)
+        assertEquals("תלמוד", book.heCategory)
+    }
+
+    @Test
+    fun addingTheSameBookTwice_keepsOneCopy() = runTest {
+        val repo = DataStoreLibraryRepository(storeOn(backgroundScope), backgroundScope)
+        repo.add(LibraryBook("Berakhot", "ברכות"))
+        repo.add(LibraryBook("Berakhot", "ברכות"))
+        advanceUntilIdle()
+
+        assertEquals(1, repo.books.first { list -> list.any { it.title == "Berakhot" } }.count { it.title == "Berakhot" })
     }
 }

@@ -5,55 +5,84 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
+import app.opensefer.core.domain.LibraryRepository
+import app.opensefer.core.domain.OfflineStorage
+import app.opensefer.ui.UiStrings
+import app.opensefer.ui.components.AppTopBar
 import app.opensefer.ui.theme.LocalReadingColors
+import kotlinx.coroutines.launch
+import org.koin.compose.koinInject
 
 /**
  * Credits & attribution. Sefaria's data terms require crediting the source/edition; this screen
- * carries that, plus the project's own license note. (BLUEPRINT §7.4 / §13)
+ * carries that, the project's own license note, and the on‑device text storage (with a way to free it).
+ * (BLUEPRINT §7.4 / §13)
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AboutScreen(onBack: () -> Unit) {
+fun AboutScreen(
+    onBack: () -> Unit,
+    storage: OfflineStorage = koinInject(),
+    library: LibraryRepository = koinInject(),
+) {
     val colors = LocalReadingColors.current
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("About") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("‹ Back") } },
-            )
-        },
-    ) { padding ->
+    val scope = rememberCoroutineScope()
+    var savedBytes by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(Unit) { savedBytes = storage.sizeBytes() }
+
+    Scaffold(containerColor = colors.background, topBar = { AppTopBar(UiStrings.ABOUT, onBack = onBack) }) { padding ->
         Column(
             Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(20.dp),
         ) {
-            Paragraph("OpenSefer", MaterialTheme.typography.headlineSmall, colors.text)
+            Paragraph(UiStrings.APP_NAME, MaterialTheme.typography.headlineSmall, colors.text)
             Paragraph(
-                "A minimalist, open‑source reader for Jewish texts, built with Kotlin Multiplatform " +
-                    "and Compose Multiplatform.",
+                "קורא מינימליסטי בקוד פתוח לספרי הקודש — בלי חשבון ובלי הסחות דעת. נבנה ב‑Kotlin Multiplatform " +
+                    "וב‑Compose Multiplatform.",
                 MaterialTheme.typography.bodyMedium,
                 colors.secondaryText,
             )
-            Paragraph("Texts", MaterialTheme.typography.titleMedium, colors.text)
+            Paragraph("הטקסטים", MaterialTheme.typography.titleMedium, colors.text)
             Paragraph(
-                "Texts are provided by Sefaria (sefaria.org) and remain © their publishers under " +
-                    "their respective Creative Commons licenses (CC0 / CC‑BY / CC‑BY‑SA, per edition). " +
-                    "OpenSefer is not affiliated with or endorsed by Sefaria.",
+                "הטקסטים מגיעים מספריא (sefaria.org) ושמורים לבעליהם, תחת רישיונות Creative Commons " +
+                    "(CC0 / CC‑BY / CC‑BY‑SA, לפי מהדורה). OpenSefer אינו קשור לספריא ואינו מטעמה.",
                 MaterialTheme.typography.bodySmall,
                 colors.secondaryText,
             )
-            Paragraph("License", MaterialTheme.typography.titleMedium, colors.text)
+            Paragraph(UiStrings.SAVED_TEXTS, MaterialTheme.typography.titleMedium, colors.text)
             Paragraph(
-                "Application code is licensed under Apache‑2.0. See the project repository for source, " +
-                    "attribution details, and how to contribute.",
+                "כל ספר שפתחתם נשמר במכשיר, כדי שייפתח מיד וגם בלי אינטרנט. ספרים שבספרייה נשמרים במלואם." +
+                    (savedBytes?.let { "\nבשימוש כעת: ${formatSize(it)}" } ?: ""),
+                MaterialTheme.typography.bodySmall,
+                colors.secondaryText,
+            )
+            OutlinedButton(
+                onClick = {
+                    scope.launch {
+                        storage.clear()
+                        library.books.value.forEach { library.setOffline(it.title, false) }
+                        savedBytes = storage.sizeBytes()
+                    }
+                },
+                enabled = (savedBytes ?: 0L) > 0L,
+                modifier = Modifier.padding(top = 8.dp),
+            ) { Text(UiStrings.CLEAR_SAVED_TEXTS, color = colors.accent) }
+            Paragraph("רישיון", MaterialTheme.typography.titleMedium, colors.text)
+            Paragraph(
+                "קוד האפליקציה מופץ ברישיון Apache‑2.0. בקוד המקור תמצאו פרטי ייחוס והנחיות לתרומה.",
                 MaterialTheme.typography.bodySmall,
                 colors.secondaryText,
             )
@@ -61,7 +90,16 @@ fun AboutScreen(onBack: () -> Unit) {
     }
 }
 
+private const val KB = 1024.0
+private const val MB = KB * 1024
+
+internal fun formatSize(bytes: Long): String = when {
+    bytes >= MB -> "${(bytes / MB * 10).toLong() / 10.0} MB"
+    bytes >= KB -> "${(bytes / KB).toLong()} KB"
+    else -> "$bytes B"
+}
+
 @Composable
-private fun Paragraph(text: String, style: androidx.compose.ui.text.TextStyle, color: androidx.compose.ui.graphics.Color) {
+private fun Paragraph(text: String, style: TextStyle, color: Color) {
     Text(text = text, style = style, color = color, modifier = Modifier.padding(top = 14.dp))
 }

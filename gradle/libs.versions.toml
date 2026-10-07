@@ -24,9 +24,6 @@ androidx-datastore = "1.1.1"
 androidx-startup = "1.1.1"           # captures the Android Context for the DataStore path
 okio = "3.9.0"                       # multiplatform file paths for DataStore (transitive is 3.4.0)
 
-# HTML parsing (Sefaria text → AnnotatedString)
-ksoup = "0.2.2"
-
 # Quality
 detekt = "1.23.7"
 
@@ -56,15 +53,11 @@ kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-t
 # DI
 koin-core = { module = "io.insert-koin:koin-core", version.ref = "koin" }
 koin-compose = { module = "io.insert-koin:koin-compose", version.ref = "koin" }
-koin-compose-viewmodel = { module = "io.insert-koin:koin-compose-viewmodel", version.ref = "koin" }
 
 # Persistence
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences-core", version.ref = "androidx-datastore" }
 androidx-startup-runtime = { module = "androidx.startup:startup-runtime", version.ref = "androidx-startup" }
 okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
-
-# HTML parsing
-ksoup = { module = "com.fleeksoft.ksoup:ksoup", version.ref = "ksoup" }
 
 # Testing
 turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }

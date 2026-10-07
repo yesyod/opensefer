@@ -3,11 +3,17 @@ package app.opensefer.core.domain
 import app.opensefer.core.model.BookAbout
 import app.opensefer.core.model.BookContents
 import app.opensefer.core.model.BookSearchResult
+import app.opensefer.core.model.Bookmark
 import app.opensefer.core.model.ChapterText
 import app.opensefer.core.model.LibraryBook
+import app.opensefer.core.model.ReadingPosition
 import kotlinx.coroutines.flow.StateFlow
 
-/** Reads structure and text from Sefaria, with caching (impl in :shared/data). */
+/**
+ * Reads structure and text from Sefaria, **offline‑first**: memory → on‑device cache → network
+ * (impl in :shared/data). Anything fetched once is kept on the device, so a book opens instantly the
+ * next time and stays readable without a connection. Failures arrive as a [DataError].
+ */
 interface TextRepository {
     /** A book's navigable table of contents (numbered chapters or named sections). */
     suspend fun getContents(bookTitle: String): Result<BookContents>
@@ -18,16 +24,48 @@ interface TextRepository {
     /** Rich metadata for the "About this book" screen (index + author bio + editions). */
     suspend fun getAbout(bookTitle: String): Result<BookAbout>
 
-    /** Fire‑and‑forget warm of the cache for snappy paging; failures are swallowed. */
+    /** Fire‑and‑forget warm of the caches for snappy paging; failures are swallowed. */
     suspend fun prefetch(tref: String)
+
+    /**
+     * Makes sure [tref] is in the on‑device cache (downloading it if needed) without parsing it —
+     * the building block of whole‑book offline downloads.
+     */
+    suspend fun cacheForOffline(tref: String): Result<Unit>
 }
 
-/** The user's selected books + resume positions (local only, no account). */
+/** The user's saved books + resume positions (local only, no account). */
 interface LibraryRepository {
     val books: StateFlow<List<LibraryBook>>
+
+    /** False until the persisted library has been read once — lets the first frame skip a flash of defaults. */
+    val loaded: StateFlow<Boolean>
+
     fun add(book: LibraryBook)
     fun remove(title: String)
-    fun updatePosition(title: String, tref: String, label: String)
+
+    /** Remembers where the reader is in a saved book (no‑op for books that aren't saved). */
+    fun updatePosition(title: String, position: ReadingPosition)
+
+    /** Fills in the cover metadata (category, author) once the book's index is known. */
+    fun updateDetails(title: String, category: String?, heCategory: String?, heAuthor: String?)
+
+    fun setOffline(title: String, offline: Boolean)
+}
+
+/** Saved places inside books — one segment each — newest first. */
+interface BookmarkRepository {
+    val bookmarks: StateFlow<List<Bookmark>>
+
+    /** Adds [bookmark], replacing any existing bookmark on the same segment. */
+    fun add(bookmark: Bookmark)
+    fun remove(id: String)
+}
+
+/** The on‑device copy of every text read or downloaded — so the user can see and free its space. */
+interface OfflineStorage {
+    suspend fun sizeBytes(): Long
+    suspend fun clear()
 }
 
 /** Title autocomplete for adding a book. */
@@ -38,6 +76,10 @@ interface SearchRepository {
 /** Reading preferences (font scale, theme, language, nikud). */
 interface ReadingPreferencesRepository {
     val preferences: StateFlow<ReadingPreferences>
+
+    /** False until the persisted preferences have been read once (see [LibraryRepository.loaded]). */
+    val loaded: StateFlow<Boolean>
+
     fun setFontScale(scale: Float)
     fun setTheme(theme: ReadingTheme)
     fun setLanguage(language: ReadingLanguage)

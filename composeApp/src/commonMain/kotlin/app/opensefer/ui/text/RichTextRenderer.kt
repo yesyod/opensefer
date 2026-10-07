@@ -25,9 +25,11 @@ fun RichText.toAnnotatedString(secondaryColor: Color): AnnotatedString = buildAn
         pop()
         (span.link as? SpanLink.Footnote)?.let { footnote ->
             pushStyle(SpanStyle(fontSize = 0.82.em, fontStyle = FontStyle.Italic, color = secondaryColor))
-            append(" (")
+            // First‑strong isolate (FSI…PDI): an English note inside Hebrew text (or vice versa) keeps
+            // its own direction instead of scrambling the punctuation around it.
+            append(" \u2068(")
             append(footnote.body)
-            append(")")
+            append(")\u2069")
             pop()
         }
     }

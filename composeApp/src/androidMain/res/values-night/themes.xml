@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark window background before the first Compose frame, so a dark-mode launch doesn't flash white. -->
+    <style name="Theme.OpenSefer" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#121212</item>
+    </style>
+</resources>

@@ -77,7 +77,8 @@ class SefariaApiMockTest {
         api.text("Genesis.1")
 
         val q = query!!
-        assertTrue(q.contains("version=hebrew"), "query was: $q")
+        // "source" (not "hebrew"): Aramaic originals — the Talmud, Targumim — are tagged Aramaic.
+        assertTrue(q.contains("version=source"), "query was: $q")
         assertTrue(q.contains("version=english"), "query was: $q")
         assertTrue(q.contains("return_format=default"), "query was: $q")
     }

@@ -69,6 +69,13 @@ translator for the text you're reading.
 If you contribute text-facing features, please keep this per-edition attribution
 intact and visible.
 
+### Copies kept on your device
+
+To open instantly and work offline, OpenSefer stores the texts you read (and the books you save) on
+your own device, exactly as Sefaria served them — edition title and license included. These copies
+are for your reading only, are never redistributed by the app, and remain under their edition's
+license; you can delete them any time from the About screen.
+
 ---
 
 ## OpenSefer is independent — not affiliated with Sefaria
@@ -96,5 +103,6 @@ Please preserve this in forks and derivatives.
 | OpenSefer application code | Apache-2.0 — see [LICENSE](LICENSE) |
 | Jewish texts & translations | © their publishers, via Sefaria, **per-edition** CC0 / CC-BY / CC-BY-SA |
 | Affiliation with Sefaria | None — independent, not endorsed |
+| UI icon shapes (`ui/icons/AppIcons.kt`) | Path data from [Material Icons](https://github.com/google/material-design-icons), Apache-2.0 |
 
 Texts by **[Sefaria](https://www.sefaria.org)**. Thank you for keeping Torah open. 🙏

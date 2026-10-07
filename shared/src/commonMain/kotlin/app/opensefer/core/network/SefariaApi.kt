@@ -17,11 +17,12 @@ import io.ktor.http.appendPathSegments
  */
 class SefariaApi(private val client: HttpClient) {
 
-    /** Title autocomplete — used when adding a book. */
+    /** Title autocomplete — used when adding a book. `type=ref` keeps it to texts (no topics/people). */
     suspend fun name(query: String, limit: Int = 12): NameResponseDto =
         client.get("$BASE/name") {
             url { appendPathSegments(query) }
             parameter("limit", limit)
+            parameter("type", "ref")
         }.body()
 
     /** Structural index/TOC for a book (depth, sectionNames, lengths…). */
@@ -31,13 +32,14 @@ class SefariaApi(private val client: HttpClient) {
         }.body()
 
     /**
-     * Section text (v3). Requests both Hebrew and English versions in one call; the response's
-     * `versions[]` carries whichever exist. `return_format=default` keeps Sefaria's inline HTML.
+     * Section text (v3). Requests the original‑language version (`source` — Hebrew *or* Aramaic, e.g.
+     * the Talmud or a Targum, which `hebrew` would miss) and the English one in a single call; the
+     * response's `versions[]` carries whichever exist. `return_format=default` keeps the inline HTML.
      */
     suspend fun text(tref: String): V3TextResponseDto =
         client.get("$BASE/v3/texts") {
             url { appendPathSegments(tref) }
-            parameter("version", "hebrew")
+            parameter("version", "source")
             parameter("version", "english")
             parameter("return_format", "default")
         }.body()

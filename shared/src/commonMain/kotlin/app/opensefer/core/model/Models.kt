@@ -30,13 +30,15 @@ data class TocBranch(
 
 /**
  * A directly‑readable unit (a chapter, a prayer…). [tref] is the exact, complete Sefaria ref to
- * fetch; [crumb] is the Hebrew breadcrumb shown in the table of contents.
+ * fetch; [crumb] is the Hebrew breadcrumb shown in the table of contents; [shortLabel] is the compact
+ * form for a chapter grid ("א", or "ב." / "ב:" for a Talmud amud).
  */
 data class TocLeaf(
     override val title: String,
     override val heTitle: String,
     val crumb: String,
     val tref: String,
+    val shortLabel: String = heTitle,
 ) : TocNode
 
 /** A book's full navigable structure (from `/api/index/{title}`). */
@@ -45,10 +47,23 @@ data class BookContents(
     val heTitle: String,
     val isComplex: Boolean,
     val root: TocBranch,
+    val details: BookDetails = BookDetails(),
 ) {
     /** Every readable leaf, in reading order — drives prev/next paging and the jump picker. */
     val leaves: List<TocLeaf> = buildList { flattenLeaves(root, this) }
 }
+
+/**
+ * Shelf metadata derived from a book's index — enough to draw its cover and label its segments.
+ * Every field is optional: Sefaria omits authors for many books, and complex books have no single
+ * segment name.
+ */
+data class BookDetails(
+    val category: String? = null,      // top‑level English category ("Halakhah") — picks the cover colour
+    val heCategory: String? = null,    // its Hebrew label ("הלכה")
+    val heAuthor: String? = null,      // "רמב״ם"
+    val heSegmentName: String? = null, // what one segment is called ("הלכה", "פסוק") — simple books only
+)
 
 private fun flattenLeaves(node: TocNode, out: MutableList<TocLeaf>) {
     when (node) {
@@ -65,6 +80,7 @@ data class Segment(
     val isRubric: Boolean,    // a Sefaria instruction line ("say this:") — de‑emphasized, un‑numbered
     val hebrew: RichText?,
     val english: RichText?,
+    val enLabel: String = "", // the same marker in digits ("3", or "2:4" in a commentary) for English citations
 )
 
 /** The fully‑loaded text of one readable unit (one [tref]), ready to render. */
@@ -74,6 +90,8 @@ data class ChapterText(
     val heDisplayTitle: String,
     val segments: List<Segment>,
     val attribution: Attribution,
+    val ref: String? = null,   // Sefaria's normalized English ref ("Genesis 1") — for citations
+    val heRef: String? = null, // …and its Hebrew form ("בראשית א׳")
 )
 
 /** Per‑edition credit + license — required by Sefaria's data terms (see ATTRIBUTION.md). */
@@ -122,14 +140,61 @@ data class EditionInfo(
     val source: String?,
 )
 
-/** A book the user has added to their library, with a resume position. */
+/**
+ * A book the user saved to their library: its resume position (down to the segment), reading
+ * progress for the cover, and the shelf metadata the cover is drawn from. Every field after
+ * [heTitle] has a default, so libraries persisted by older versions still decode.
+ */
 @Serializable
 data class LibraryBook(
-    val title: String,             // canonical Sefaria title (the identifier)
+    val title: String,              // canonical Sefaria title (the identifier)
     val heTitle: String,
-    val lastTref: String? = null,  // last‑opened readable unit; null = never opened
-    val lastLabel: String? = null, // display label for that unit, e.g. "פרק א" / "מודה אני"
+    val lastTref: String? = null,   // last‑read readable unit; null = never opened
+    val lastLabel: String? = null,  // display label for that place, e.g. "פרק א, הלכה ג" / "מודה אני"
+    val lastSegment: Int = 0,       // Segment.index within [lastTref] — exact resume…
+    val lastOffset: Int = 0,        // …and how far into that segment (px) the page was scrolled
+    val progress: Float = 0f,       // 0..1 through the book, drawn under the cover
+    val lastReadAt: Long = 0L,      // epoch millis of the last read; 0 = never
+    val addedAt: Long = 0L,         // epoch millis it was saved
+    val category: String? = null,   // see [BookDetails]
+    val heCategory: String? = null,
+    val heAuthor: String? = null,
+    val offline: Boolean = false,   // every passage is in the local cache
 )
+
+/**
+ * Where the reader is in a book: a passage ([tref]), the [segment] index inside it, and the scroll
+ * [offset] (px) into that segment — so a long halacha reopens mid‑way, exactly where it was left.
+ */
+data class ReadingPosition(
+    val tref: String,
+    val segment: Int,
+    val label: String,
+    val progress: Float,
+    val offset: Int = 0,
+)
+
+/** A saved place in a book — one segment — with a short [snippet] of its text for the list. */
+@Serializable
+data class Bookmark(
+    val bookTitle: String,
+    val heBookTitle: String,
+    val tref: String,
+    val segment: Int,
+    val label: String,
+    val snippet: String,
+    val createdAt: Long = 0L,
+) {
+    val id: String get() = bookmarkId(tref, segment)
+}
+
+/** The stable identity of a bookmark: one segment of one passage. */
+fun bookmarkId(tref: String, segment: Int): String = "$tref#$segment"
+
+/** Progress of a whole‑book offline download: [done] of [total] passages are cached. */
+data class DownloadProgress(val done: Int, val total: Int) {
+    val fraction: Float get() = if (total <= 0) 0f else done.toFloat() / total
+}
 
 /**
  * A search/autocomplete hit when adding a book.

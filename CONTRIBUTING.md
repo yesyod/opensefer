@@ -121,8 +121,8 @@ and Ktor's `MockEngine`.
 # Run all shared targets' tests (Android + iOS simulator + ...)
 ./gradlew :shared:allTests
 
-# Faster local loop — just the JVM/Android unit tests
-./gradlew :shared:testDebugUnitTest
+# Faster local loop — just the JVM/Android unit tests (shared logic + ViewModels)
+./gradlew :shared:testDebugUnitTest :composeApp:testDebugUnitTest
 ```
 
 Please add or update tests for any behavior you change, especially in the HTML→
@@ -151,9 +151,11 @@ are auto-fixable in the IDE (**Code → Reformat Code** with the project's
 - **Kotlin official style.** `kotlin.code.style=official` is set in
   `gradle.properties`; `.editorconfig` enforces 4-space indent, a 120-column limit,
   a trailing newline, and `ktlint_official`. No wildcard imports.
-- **No Material-icons dependency.** OpenSefer deliberately avoids
-  `androidx.compose.material:material-icons-*`. Use plain **text glyphs** (e.g. `+`,
-  `⌄`, `א`) for affordances — it keeps the binary small and the look minimalist.
+- **No Material-icons artifact.** OpenSefer deliberately avoids
+  `material-icons-extended`. The dozen icons it needs are tiny in-code vectors in
+  [`ui/icons/AppIcons.kt`](composeApp/src/commonMain/kotlin/app/opensefer/ui/icons/AppIcons.kt)
+  (add one there, with a Hebrew `contentDescription` where it's used) — it keeps the
+  binary small and the look minimalist.
 - **Immutable state.** One immutable `data class XxxUiState` per screen, exposed as a
   `StateFlow`. Events are plain function calls on the ViewModel — no MVI framework.
 - **`Result`, not exceptions, at boundaries.** The data layer returns `Result<T>` (or
@@ -178,8 +180,8 @@ Today the app is a clean **2-module** split whose internal packages mirror the
 finer-grained `core:*` / `feature:*` target in BLUEPRINT §5:
 
 - `:shared` — `app.opensefer.core.{model, network, data, domain, di}` (no UI).
-- `:composeApp` — `app.opensefer` + `app.opensefer.ui.{theme, text, navigation,
-  library, search, toc, reader, about}`.
+- `:composeApp` — `app.opensefer` + `app.opensefer.ui.{theme, text, icons, components,
+  navigation, library, book, search, toc, reader, about}`.
 
 **Layering rules to respect in any PR:**
 

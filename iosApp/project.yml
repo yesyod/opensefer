@@ -25,7 +25,7 @@ targets:
         ONLY_ACTIVE_ARCH: YES
         FRAMEWORK_SEARCH_PATHS:
           - $(inherited)
-          - $(SRCROOT)/../composeApp/build/bin/iosSimulatorArm64/debugFramework
+          - $(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)
         OTHER_LDFLAGS:
           - $(inherited)
           - -framework

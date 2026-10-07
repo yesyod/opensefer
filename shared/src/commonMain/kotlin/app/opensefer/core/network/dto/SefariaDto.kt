@@ -14,6 +14,8 @@ data class V3TextResponseDto(
     val title: String? = null,
     val heTitle: String? = null,
     val versions: List<V3VersionDto> = emptyList(),
+    // Sefaria reports a bad ref as HTTP 200 + {"error": "..."} — never cache such a response.
+    val error: String? = null,
 )
 
 @Serializable
@@ -29,6 +31,7 @@ data class V3VersionDto(
 
 @Serializable
 data class IndexDto(
+    val error: String? = null, // HTTP 200 + {"error": "..."} for an unknown title
     val title: String? = null,
     val heTitle: String? = null,
     val categories: List<String> = emptyList(),
@@ -121,6 +124,9 @@ data class SchemaDto(
     val addressTypes: List<String> = emptyList(),
     // Complex texts (e.g. a Siddur) nest named child nodes instead of a flat depth/lengths.
     val nodes: List<SchemaDto>? = null,
+    // The untitled "default" child of a complex book (its main body, e.g. Ramban on Genesis 1:1):
+    // it adds nothing to the ref path.
+    @SerialName("default") val isDefault: Boolean = false,
 )
 
 /* ---- /api/name/{query} ---- */

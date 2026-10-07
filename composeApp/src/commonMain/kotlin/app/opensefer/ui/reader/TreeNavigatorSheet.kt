@@ -1,59 +1,84 @@
 package app.opensefer.ui.reader
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.opensefer.core.model.Bookmark
 import app.opensefer.core.model.TocBranch
 import app.opensefer.core.model.TocLeaf
-import app.opensefer.core.model.TocNode
+import app.opensefer.ui.UiStrings
+import app.opensefer.ui.components.IconAction
+import app.opensefer.ui.icons.AppIcons
 import app.opensefer.ui.theme.LocalReadingColors
+import app.opensefer.ui.toc.rememberTocBrowserState
+import app.opensefer.ui.toc.tocItems
 
 /**
- * A drill‑down tree over a book's structure. Tap a topic (a [TocBranch]) to go deeper; tap a
- * passage (a [TocLeaf]) — or "read from here" on a topic — to jump the continuous reader to it.
+ * The reader's navigator: the book's structure (a chapter grid, or a drill‑down tree opened at the
+ * current passage) and, on a second tab, this book's bookmarks. Tapping either jumps the continuous
+ * reader there.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TreeNavigatorSheet(
+fun ContentsSheet(
     root: TocBranch,
-    onJump: (tref: String) -> Unit,
+    currentTref: String?,
+    bookmarks: List<Bookmark>,
+    startOnBookmarks: Boolean,
+    onOpen: (TocLeaf) -> Unit,
+    onOpenBookmark: (Bookmark) -> Unit,
+    onDeleteBookmark: (Bookmark) -> Unit,
     onAbout: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val colors = LocalReadingColors.current
-    val stack = remember { mutableStateListOf(root) }
-    val current = stack.last()
+    var showBookmarks by rememberSaveable { mutableStateOf(startOnBookmarks) }
+    val browser = rememberTocBrowserState(root, currentTref)
 
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = colors.surface) {
-        Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).padding(bottom = 12.dp)) {
-            // Book title — pinned at the top — with the "about this book" affordance beside it.
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = colors.surface,
+    ) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 620.dp)) {
             Row(
-                Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 4.dp),
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -61,72 +86,119 @@ fun TreeNavigatorSheet(
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = colors.text,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(onClick = onAbout) {
-                    Icon(Icons.Outlined.Info, contentDescription = "About this book", tint = colors.accent)
-                }
+                IconAction(AppIcons.Info, UiStrings.ABOUT_BOOK, onAbout)
             }
-            HorizontalDivider(color = colors.secondaryText.copy(alpha = 0.2f))
-
-            // Drill‑down breadcrumb — shown only while inside a sub‑section (at the root it would
-            // just repeat the pinned book title above).
-            if (stack.size > 1) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TextButton(onClick = { stack.removeAt(stack.lastIndex) }) {
-                        Text("‹ ${stack[stack.size - 2].heTitle}", color = colors.accent)
-                    }
-                    Text(
-                        text = current.heTitle,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = colors.text,
-                        modifier = Modifier.padding(horizontal = 8.dp),
-                    )
-                }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                SheetTab(UiStrings.CONTENTS, selected = !showBookmarks, Modifier.weight(1f)) { showBookmarks = false }
+                SheetTab(
+                    text = if (bookmarks.isEmpty()) UiStrings.BOOKMARKS else "${UiStrings.BOOKMARKS} (${bookmarks.size})",
+                    selected = showBookmarks,
+                    modifier = Modifier.weight(1f),
+                ) { showBookmarks = true }
             }
-
-            if (stack.size > 1) {
-                TextButton(
-                    onClick = { firstLeafTref(current)?.let(onJump) },
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                ) { Text("↓ קרא מכאן", color = colors.accent) }
-            }
-
+            HorizontalDivider(color = colors.divider)
             LazyColumn(
                 modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 24.dp),
             ) {
-                items(current.children) { child ->
-                    Surface(
-                        onClick = {
-                            when (child) {
-                                is TocBranch -> stack.add(child)
-                                is TocLeaf -> onJump(child.tref)
-                            }
-                        },
-                        shape = RoundedCornerShape(10.dp),
-                        color = colors.surface,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 13.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(child.heTitle, color = colors.text, style = MaterialTheme.typography.bodyLarge)
-                            if (child is TocBranch) Text("›", color = colors.secondaryText)
-                        }
-                    }
+                if (showBookmarks) {
+                    bookmarkItems(bookmarks, onOpenBookmark, onDeleteBookmark)
+                } else {
+                    tocItems(browser, currentTref, onOpen)
                 }
             }
         }
     }
 }
 
-private fun firstLeafTref(node: TocNode): String? = when (node) {
-    is TocLeaf -> node.tref
-    is TocBranch -> node.children.firstNotNullOfOrNull { firstLeafTref(it) }
+@Composable
+private fun SheetTab(text: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val colors = LocalReadingColors.current
+    Column(
+        modifier
+            .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+            .clickable(role = Role.Tab, onClick = onClick)
+            .semantics { this.selected = selected }
+            .padding(top = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = text,
+            color = if (selected) colors.accent else colors.secondaryText,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            style = MaterialTheme.typography.titleSmall,
+        )
+        Box(
+            Modifier
+                .padding(top = 8.dp)
+                .fillMaxWidth()
+                .height(2.dp)
+                .then(if (selected) Modifier.background(colors.accent) else Modifier),
+        )
+    }
+}
+
+private fun LazyListScope.bookmarkItems(
+    bookmarks: List<Bookmark>,
+    onOpen: (Bookmark) -> Unit,
+    onDelete: (Bookmark) -> Unit,
+) {
+    if (bookmarks.isEmpty()) {
+        item(key = "bm-empty") {
+            Text(
+                text = UiStrings.NO_BOOKMARKS,
+                color = LocalReadingColors.current.secondaryText,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(24.dp),
+            )
+        }
+        return
+    }
+    items(bookmarks, key = { "bm-${it.id}" }) { bookmark ->
+        BookmarkRow(bookmark, showBook = false, onOpen = { onOpen(bookmark) }, onDelete = { onDelete(bookmark) })
+    }
+}
+
+/** One bookmark: where it is, a line of its text, and a delete button. Shared with the library. */
+@Composable
+fun BookmarkRow(bookmark: Bookmark, showBook: Boolean, onOpen: () -> Unit, onDelete: () -> Unit) {
+    val colors = LocalReadingColors.current
+    Surface(
+        onClick = onOpen,
+        shape = RoundedCornerShape(12.dp),
+        color = colors.surface,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(AppIcons.Bookmark, contentDescription = null, tint = colors.accent, modifier = Modifier.size(20.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = if (showBook) "${bookmark.heBookTitle} · ${bookmark.label}" else bookmark.label,
+                    color = colors.text,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (bookmark.snippet.isNotBlank()) {
+                    Text(
+                        text = bookmark.snippet,
+                        color = colors.secondaryText,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            IconAction(AppIcons.Delete, UiStrings.REMOVE_BOOKMARK, onDelete, tint = colors.secondaryText)
+        }
+    }
 }

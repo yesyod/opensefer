@@ -22,18 +22,22 @@ No accounts. No onboarding. No bloat. Open the app and read.
 
 OpenSefer is two things at once:
 
-1. **A genuinely useful app** — a calm, fast, beautiful reader that shows only the books *you* chose and fetches text on the fly from Sefaria's open API.
-2. **A reference‑grade example** of how to build a modern **Kotlin Multiplatform + Compose Multiplatform** app *correctly* — clean architecture, unidirectional data flow, a shared UI for both platforms, network‑first data with smart caching, and full RTL/Hebrew support. **Fork it as the foundation for your own KMP app.**
+1. **A genuinely useful app** — a calm, fast, beautiful reader that shows only the books *you* chose, fetches text from Sefaria's open API, and keeps every book you open on the device so it opens instantly — even offline.
+2. **A reference‑grade example** of how to build a modern **Kotlin Multiplatform + Compose Multiplatform** app *correctly* — clean architecture, unidirectional data flow, a shared UI for both platforms, offline‑first data with a layered cache, and full RTL/Hebrew support. **Fork it as the foundation for your own KMP app.**
 
 The complete design rationale lives in **[BLUEPRINT.md](BLUEPRINT.md)** — read it to understand *why* every decision was made.
 
 ## ✨ Features
 
 - **Zero onboarding** — instant reading, fully local, no login, no Firebase.
-- **Your library, only your books** — the home screen shows nothing you didn't add. Tap a book to *resume* where you left off (Kindle‑style); long‑press to browse its chapters.
-- **Network‑first reading** — text is fetched on demand from Sefaria and cached in memory (with neighbour‑chapter prefetch) so paging feels instant.
-- **Built for Hebrew** — first‑class RTL/BiDi, segment‑by‑segment chapters, and a client‑side **nikud** (vowels) toggle.
-- **A real reading experience** — adjustable text size, **Hebrew / English / bilingual** display, three reading **themes** (light · sepia · dark), and a quick **chapter picker** from the reader header.
+- **Your library, as a shelf of covers** — the home screen shows only the books you saved, each with a generated, category‑coloured **book cover** (leather board, spine on the right, gold lettering), reading progress and an "available offline" mark. A **continue reading** card sits on top; tap any cover to resume exactly where you stopped; long‑press for its contents, offline download or removal (with undo).
+- **One‑tap save** — save a book from search, from its book page or from inside the reader.
+- **Offline‑first** — every index and passage you open is kept on the device (memory → disk → network), so books reopen instantly and stay readable without a connection; saved books download completely in the background. See [ADR 0004](docs/adr/0004-offline-first-text-storage.md).
+- **Copy a passage** — long‑press to select words, or tap verse numbers to pick whole verses and copy them **with their source** (e.g. `(בראשית א׳:א-ג)`).
+- **Bookmarks at exact places** — bookmark any verse/halacha (or "here" from the top bar); find them in the reader's contents sheet and on the home screen.
+- **Exact resume** — the reader reopens on the very segment (and scroll offset) you were reading.
+- **Built for Hebrew** — a right‑to‑left Hebrew interface, first‑class BiDi (English stays left‑to‑right), and a client‑side **nikud** (vowels) toggle; Talmud tractates are addressed by daf and amud (ב. / ב:).
+- **A real reading experience** — one continuous scroll through the whole book, adjustable text size, **Hebrew / English / bilingual** display, three reading **themes** (light · sepia · dark), a top bar that slides away while you read, and a chapter grid / section tree a tap away.
 - **Segment‑addressable** — every halacha/verse is an individually addressable unit, so commentaries (Phase 2) drop in without reworking the reader.
 
 ## 🚀 Quick start
@@ -74,7 +78,7 @@ Compose UI (screens) ── ViewModel ──exposes── StateFlow<UiState>
         ▼
    Ktor + kotlinx.serialization → Sefaria API → HTML parser → domain models
         ▲
-   in‑memory LRU cache (network‑first, neighbour prefetch)
+   memory LRU → on‑device store (okio, offline‑first) → network (de‑duplicated)
 ```
 
 - **State:** one immutable `UiState` per screen, exposed as `StateFlow`; events are plain function calls. No MVI framework — the Google‑recommended pattern.
@@ -111,14 +115,14 @@ opensefer/
 | State | `androidx.lifecycle` ViewModel (multiplatform) + `StateFlow` |
 | DI | Koin |
 | Async | kotlinx.coroutines + Flow |
-| Caching | hand‑rolled in‑memory LRU (network‑first) |
-| Persistence | Jetpack DataStore (Preferences, multiplatform) — settings, library & reading position |
+| Caching | offline‑first: in‑memory LRU → on‑device JSON store (okio) → network, with in‑flight de‑duplication |
+| Persistence | Jetpack DataStore (Preferences, multiplatform) — settings, library, reading position & bookmarks |
 
 Exact versions are pinned in [`gradle/libs.versions.toml`](gradle/libs.versions.toml).
 
 ## 🧭 Status & roadmap
 
-**Working today:** Library (resume‑on‑tap) · Search (Sefaria autocomplete) · **continuous reader** — the whole book scrolls as one stream (simple *and* complex books such as a Siddur) with a drill‑down **section tree**, RTL Hebrew + English, numbered segments (instruction rubrics un‑numbered), font scaling, themes, nikud toggle · **everything persists across restarts** (settings, library, reading position — Jetpack DataStore) · About/attribution.
+**Working today:** Library shelf with generated covers · Search (Sefaria autocomplete, one‑tap save) · Book page (chapter grid / section tree) · **continuous reader** — the whole book scrolls as one stream, one row per segment (simple *and* complex books such as a Siddur; Talmud by daf/amud), RTL Hebrew + LTR English, numbered segments (instruction rubrics un‑numbered), copy with source, bookmarks, font scaling, themes, nikud toggle · **offline‑first text storage** with background download of saved books · **everything persists across restarts** (settings, library, exact reading position, bookmarks — Jetpack DataStore) · About/attribution.
 
 **Documented next steps** (interfaces already in place):
 - **Phase 2 — Commentaries:** tap a segment → bottom sheet of commentators → open via the existing reader path (`/api/links`).

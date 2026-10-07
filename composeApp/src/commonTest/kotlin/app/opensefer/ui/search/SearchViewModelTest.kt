@@ -1,5 +1,6 @@
 package app.opensefer.ui.search
 
+import app.opensefer.core.domain.DataError
 import app.opensefer.core.model.BookSearchResult
 import app.opensefer.ui.FakeLibraryRepository
 import app.opensefer.ui.FakeSearchRepository
@@ -67,23 +68,41 @@ class SearchViewModelTest {
     }
 
     @Test
-    fun searchFailure_setsHebrewError() = viewModelTest {
-        val search = FakeSearchRepository(Result.failure(RuntimeException()))
+    fun searchFailure_setsAHebrewError() = viewModelTest {
+        val search = FakeSearchRepository(Result.failure(DataError.Offline()))
         val vm = SearchViewModel(search, FakeLibraryRepository())
 
         vm.onQueryChange("x")
         advanceUntilIdle()
 
-        assertEquals(UiStrings.ERROR_SEARCH, vm.state.value.error)
+        assertEquals(UiStrings.ERROR_OFFLINE, vm.state.value.error)
     }
 
     @Test
-    fun addToLibrary_addsTheBook() = viewModelTest {
+    fun emptyResults_areMarkedSearched_soTheScreenCanSayNothingWasFound() = viewModelTest {
+        val vm = SearchViewModel(FakeSearchRepository(Result.success(emptyList())), FakeLibraryRepository())
+
+        vm.onQueryChange("zzz")
+        assertFalse(vm.state.value.searched)
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.searched)
+        assertTrue(vm.state.value.results.isEmpty())
+    }
+
+    @Test
+    fun toggleSaved_savesThenRemovesTheBook_andTracksItAsSaved() = viewModelTest {
         val library = FakeLibraryRepository()
         val vm = SearchViewModel(FakeSearchRepository(), library)
+        val result = BookSearchResult("Mishneh Torah, Repentance", "הלכות תשובה", "ref")
 
-        vm.addToLibrary(BookSearchResult("Mishneh Torah, Repentance", "הלכות תשובה", "ref"))
-
+        vm.toggleSaved(result)
+        advanceUntilIdle()
         assertEquals("Mishneh Torah, Repentance", library.books.value.single().title)
+        assertTrue(result.title in vm.state.value.savedTitles)
+
+        vm.toggleSaved(result)
+        advanceUntilIdle()
+        assertTrue(library.books.value.isEmpty())
     }
 }
