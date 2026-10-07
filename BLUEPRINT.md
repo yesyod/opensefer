@@ -284,6 +284,11 @@ A trimmed v3 response shape the parser/DTO target:
 
 ## 8. Data Layer & Caching Strategy
 
+> **Superseded:** texts are now stored on the device and read from there first (memory → disk →
+> network), and saved books download in full — see
+> [ADR 0004](docs/adr/0004-offline-first-text-storage.md). The contract below still describes the
+> repository's shape.
+
 The repository is where “network‑first but feels instant” is engineered.
 
 ```kotlin
