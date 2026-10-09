@@ -8,6 +8,10 @@ All notable changes to OpenSefer are documented here. The format is based on
 
 ### Added
 
+- **App icon** — an open book with a gold bookmark cord on a navy board: one 1024 px asset for iOS
+  (Xcode derives the rest), an adaptive icon for Android 8+ (with a one‑colour layer for Android 13's
+  themed icons) plus square and round icons for Android 7, and the Play Store listing icon. All are
+  generated from one artwork by `design/app-icon/make_icons.py`.
 - **Library shelf with designed covers** — saved books appear as generated book covers in their
   category's colour (Sefaria's palette), with the spine on the right, a gold frame and gold, auto‑fitted
   titles; plus a "continue reading" card, reading progress, an offline mark, an "add book" tile and

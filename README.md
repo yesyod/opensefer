@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="design/app-icon/play-store-512.png" alt="OpenSefer app icon" width="112" />
+
 # OpenSefer
 
 **A minimalist, open‑source reader for Jewish texts — Android & iOS from one Kotlin Multiplatform codebase.**
